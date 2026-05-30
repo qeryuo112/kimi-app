@@ -1,0 +1,9 @@
+@echo off
+echo [1/3] Starting MySQL...
+start "MySQL" /MIN "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqld.exe" --datadir="%~dp0mysql_data" --port=3306 --console
+echo [2/3] Waiting for MySQL...
+timeout /t 4 /nobreak >nul
+echo [3/3] Starting App...
+set NODE_ENV=production
+"C:\Program Files\nodejs\node.exe" "%~dp0dist\boot.js"
+pause
