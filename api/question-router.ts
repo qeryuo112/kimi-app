@@ -3,7 +3,7 @@ import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { questions, userAnswers, wrongAnswers, knowledgeNodes, userSettings } from "@db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { generateQuestions, evaluateAnswer, recognizeQuestionsFromUrls } from "./lib/ai";
+import { generateQuestions, generateQuestionsFromFileUrls, evaluateAnswer, recognizeQuestionsFromUrls } from "./lib/ai";
 
 export const questionRouter = createRouter({
   // 列出题库中的题目
@@ -82,6 +82,63 @@ export const questionRouter = createRouter({
       const result = await generateQuestions(
         input.topic,
         content || input.topic,
+        input.questionType,
+        input.count,
+        input.difficulty,
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
+
+      // 保存题目到数据库
+      const savedQuestions = [];
+      for (const q of result.questions) {
+        const [{ id }] = await db
+          .insert(questions)
+          .values({
+            userId: ctx.user.id,
+            subjectId: input.subjectId,
+            nodeId: input.nodeId,
+            skillId: input.skillId,
+            questionType: input.questionType,
+            content: q.content,
+            options: q.options ? JSON.stringify(q.options) : null,
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation,
+            difficulty: q.difficulty,
+            imageUrl: q.imageUrl || null,
+            aiGenerated: true,
+          })
+          .$returningId();
+
+        savedQuestions.push({ id, ...q });
+      }
+
+      return { success: true, questions: savedQuestions };
+    }),
+
+  // AI出题（从文件URL读取内容后出题）
+  aiGenerateFromUrls: authedQuery
+    .input(
+      z.object({
+        urls: z.array(z.string().url()).min(1).max(5),
+        questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("single_choice"),
+        count: z.number().min(1).max(20).default(5),
+        difficulty: z.number().min(1).max(5).default(3),
+        subjectId: z.number().optional(),
+        nodeId: z.number().optional(),
+        skillId: z.number().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      const result = await generateQuestionsFromFileUrls(
+        input.urls,
         input.questionType,
         input.count,
         input.difficulty,

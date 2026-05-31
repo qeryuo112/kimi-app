@@ -620,7 +620,95 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
   }
 }
 
-// AI出题
+// AI出题（支持从文件URL读取内容后出题）
+export async function generateQuestionsFromFileUrls(
+  urls: string[],
+  questionType: string,
+  count: number,
+  difficulty: number,
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  questions: Array<{
+    content: string;
+    options?: Array<{ label: string; text: string }>;
+    correctAnswer: string;
+    explanation: string;
+    difficulty: number;
+    imageUrl?: string;
+  }>;
+}> {
+  const typeDesc = questionType === "mixed"
+    ? "混合题型（自动混合单选、多选、填空、简答等）"
+    : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
+
+  const systemPrompt = `你是一个专业的出题AI。请仔细阅读用户提供的文件内容，然后根据内容生成高质量的练习题。
+
+题目类型：${questionType}
+- single_choice: 单选题，必须有4个选项
+- multiple_choice: 多选题，必须有4个选项，正确答案可能是多个
+- fill_blank: 填空题
+- short_answer: 简答题
+- essay: 论述题
+- mixed: 混合题型，自动组合以上多种题型
+
+要求：
+1. 仔细理解文件中的知识点内容
+2. 题目必须紧扣文件内容，考察对知识点的理解
+3. 选项要有干扰性，不能一眼看出答案
+4. 提供详细的答案解析
+5. 每道题标注难度(1-5)
+6. mixed模式下，必须混合至少2种不同题型
+
+请返回JSON格式：
+{
+  "questions": [
+    {
+      "content": "题目内容",
+      "options": [{"label": "A", "text": "选项A"}, {"label": "B", "text": "选项B"}, {"label": "C", "text": "选项C"}, {"label": "D", "text": "选项D"}],
+      "correctAnswer": "A",
+      "explanation": "解析",
+      "difficulty": 3
+    }
+  ]
+}`;
+
+  // 构建多模态内容
+  const contentBlocks: KimiContent[] = urls.map((url) => {
+    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+    const videoExts = ["mp4", "mov", "avi", "mkv", "webm"];
+    if (imageExts.includes(ext)) {
+      return { type: "image_url", image_url: { url } };
+    }
+    if (videoExts.includes(ext)) {
+      return { type: "video_url", video_url: { url } };
+    }
+    return { type: "file_url", file_url: { url } };
+  });
+
+  const userPrompt = `请根据文件内容生成 ${count} 道 ${typeDesc}，难度要求 ${difficulty}/5。`;
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: [...contentBlocks, { type: "text", text: userPrompt }],
+    },
+  ];
+
+  const result = await chatWithAI(messages, 0.7, apiKey, apiUrl, modelName, true);
+
+  try {
+    const parsed = JSON.parse(result);
+    return { questions: parsed.questions || [] };
+  } catch {
+    throw new Error("AI返回的题目数据格式不正确");
+  }
+}
+
+// AI出题（基于文本内容）
 export async function generateQuestions(
   topic: string,
   knowledgeContent: string,

@@ -54,6 +54,12 @@ export default function Questions() {
     difficulty: 3,
   });
 
+  // AI出题模式切换：text | file
+  const [generateMode, setGenerateMode] = useState<"text" | "file">("text");
+  const [genFiles, setGenFiles] = useState<Array<{ url: string; name: string }>>([]);
+  const [genManualUrl, setGenManualUrl] = useState("");
+  const [isGenUploading, setIsGenUploading] = useState(false);
+
   // 文档识别状态
   const [recForm, setRecForm] = useState({
     questionType: "single_choice" as const,
@@ -64,6 +70,21 @@ export default function Questions() {
   const [manualUrl, setManualUrl] = useState("");
 
   const { data: settings } = trpc.settings.get.useQuery();
+
+  // AI从文件出题
+  const aiGenerateFromUrls = trpc.question.aiGenerateFromUrls.useMutation({
+    onSuccess: (data) => {
+      toast.success(`成功生成 ${data.questions?.length || 0} 道题目`);
+      utils.question.list.invalidate();
+      setShowGenerate(false);
+      setGenFiles([]);
+      setGenManualUrl("");
+      setGenerateMode("text");
+    },
+    onError: (err) => {
+      toast.error(err.message || "出题失败");
+    },
+  });
 
   // 文档识别
   const recognizeFromUrls = trpc.question.recognizeFromUrls.useMutation({
@@ -126,8 +147,70 @@ export default function Questions() {
   });
 
   const handleGenerate = () => {
-    if (!genForm.topic.trim()) return;
-    aiGenerate.mutate(genForm);
+    if (generateMode === "text") {
+      if (!genForm.topic.trim()) return;
+      aiGenerate.mutate(genForm);
+    } else {
+      // 从文件出题
+      if (genFiles.length === 0) {
+        toast.error("请先上传文件");
+        return;
+      }
+      aiGenerateFromUrls.mutate({
+        urls: genFiles.map((f) => f.url),
+        questionType: genForm.questionType,
+        count: genForm.count,
+        difficulty: genForm.difficulty,
+      });
+    }
+  };
+
+  const handleGenFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileServerUrl = settings?.fileServerUrl?.trim();
+    if (!fileServerUrl) {
+      toast.error("请先在设置中配置文件上传服务器地址");
+      return;
+    }
+
+    setIsGenUploading(true);
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast.error(`上传失败: ${err.error || res.statusText}`);
+          continue;
+        }
+        const data = await res.json();
+        if (data.url) {
+          setGenFiles((prev) => [...prev, { url: data.url, name: file.name }]);
+          toast.success(`${file.name} 上传成功`);
+        }
+      } catch (err: any) {
+        toast.error(`上传失败: ${err.message}`);
+      }
+    }
+    setIsGenUploading(false);
+    e.target.value = "";
+  };
+
+  const handleAddGenManualUrl = () => {
+    const url = genManualUrl.trim();
+    if (!url) return;
+    if (!url.startsWith("http")) {
+      toast.error("请输入有效的 http/https URL");
+      return;
+    }
+    setGenFiles((prev) => [...prev, { url, name: url.split("/").pop() || "外部文件" }]);
+    setGenManualUrl("");
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -400,23 +483,114 @@ export default function Questions() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">知识点/主题</label>
-              <Input
-                placeholder="如：微积分导数、Java多线程"
-                value={genForm.topic}
-                onChange={(e) => setGenForm({ ...genForm, topic: e.target.value })}
-              />
+            {/* 出题模式切换 */}
+            <div className="flex gap-2 p-2 rounded-lg bg-secondary/30 border border-border">
+              <button
+                className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
+                  generateMode === "text"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setGenerateMode("text")}
+              >
+                基于文本出题
+              </button>
+              <button
+                className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
+                  generateMode === "file"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setGenerateMode("file")}
+              >
+                基于文件出题
+              </button>
             </div>
-            <div>
-              <label className="text-sm font-medium">知识点内容（可选）</label>
-              <Textarea
-                placeholder="粘贴相关知识点内容"
-                value={genForm.knowledgeContent}
-                onChange={(e) => setGenForm({ ...genForm, knowledgeContent: e.target.value })}
-                className="min-h-[80px]"
-              />
-            </div>
+
+            {generateMode === "text" ? (
+              <>
+                <div>
+                  <label className="text-sm font-medium">知识点/主题</label>
+                  <Input
+                    placeholder="如：微积分导数、Java多线程"
+                    value={genForm.topic}
+                    onChange={(e) => setGenForm({ ...genForm, topic: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">知识点内容（可选）</label>
+                  <Textarea
+                    placeholder="粘贴相关知识点内容"
+                    value={genForm.knowledgeContent}
+                    onChange={(e) => setGenForm({ ...genForm, knowledgeContent: e.target.value })}
+                    className="min-h-[80px]"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                {/* 文件上传 */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">上传学习材料</label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex-1">
+                      <Input
+                        type="file"
+                        multiple
+                        accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                        onChange={handleGenFileUpload}
+                        disabled={isGenUploading}
+                      />
+                    </label>
+                    {isGenUploading && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    上传学习材料（PDF、Word、图片等），AI将基于材料内容出题
+                  </p>
+                </div>
+
+                {/* 手动添加URL */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-1">
+                    <Link className="h-3.5 w-3.5" />
+                    或添加文件URL
+                  </label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="https://example.com/file.pdf"
+                      value={genManualUrl}
+                      onChange={(e) => setGenManualUrl(e.target.value)}
+                    />
+                    <Button variant="outline" onClick={handleAddGenManualUrl}>添加</Button>
+                  </div>
+                </div>
+
+                {/* 已上传文件列表 */}
+                {genFiles.length > 0 && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">已添加的文件 ({genFiles.length})</label>
+                    <div className="space-y-1">
+                      {genFiles.map((file, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2 rounded bg-secondary/30 border border-border">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                            <span className="text-sm truncate">{file.name}</span>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 w-6 p-0 text-red-400"
+                            onClick={() => setGenFiles((prev) => prev.filter((_, i) => i !== idx))}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
 
             <div className="grid grid-cols-3 gap-3">
               <div>
@@ -467,8 +641,19 @@ export default function Questions() {
               </div>
             </div>
 
-            <Button onClick={handleGenerate} disabled={aiGenerate.isPending} className="w-full">
-              {aiGenerate.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Sparkles className="h-4 w-4 mr-1" />}
+            <Button
+              onClick={handleGenerate}
+              disabled={
+                (generateMode === "text" && aiGenerate.isPending) ||
+                (generateMode === "file" && aiGenerateFromUrls.isPending)
+              }
+              className="w-full"
+            >
+              {(generateMode === "text" && aiGenerate.isPending) || (generateMode === "file" && aiGenerateFromUrls.isPending) ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-1" />
+              )}
               生成题目
             </Button>
           </CardContent>
