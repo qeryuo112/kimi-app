@@ -75,7 +75,7 @@ export async function chatWithAI(
   console.log(`[chatWithAI] request to ${url}, model=${modelName || "kimi-latest"}, bodySize=${bodySizeMB}MB, messages=${messages.length}`);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120秒超时
 
   const response = await fetch(url, {
     method: "POST",
