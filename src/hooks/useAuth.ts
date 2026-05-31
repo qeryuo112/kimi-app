@@ -12,7 +12,7 @@ const LOCAL_USER = {
   lastSignInAt: new Date(),
 };
 
-export function useAuth() {
+export function useAuth(_opts?: { redirectOnUnauthenticated?: boolean; redirectPath?: string }) {
   return useMemo(
     () => ({
       user: LOCAL_USER,

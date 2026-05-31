@@ -1,6 +1,5 @@
 import { Link, useLocation } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
