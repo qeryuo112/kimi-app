@@ -57,8 +57,6 @@ export default function Questions() {
   // 文档识别状态
   const [recForm, setRecForm] = useState({
     questionType: "single_choice" as const,
-    count: 5,
-    difficulty: 3,
   });
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
   const [recognizedQuestions, setRecognizedQuestions] = useState<any[]>([]);
@@ -188,8 +186,6 @@ export default function Questions() {
     recognizeFromUrls.mutate({
       urls: uploadedFiles.map((f) => f.url),
       questionType: recForm.questionType,
-      count: recForm.count,
-      difficulty: recForm.difficulty,
     });
   };
 
@@ -216,6 +212,38 @@ export default function Questions() {
     3: { label: "中等", color: "bg-yellow-500/20 text-yellow-400" },
     4: { label: "较难", color: "bg-orange-500/20 text-orange-400" },
     5: { label: "困难", color: "bg-red-500/20 text-red-400" },
+  };
+
+  const renderLatexText = (text: string) => {
+    if (!text) return text;
+    // 处理 \dot{x} 格式，转换为带点的字符
+    let processed = text
+      .replace(/\\dot\{(.)\}/g, '<span class="border-b border-current">$1̇</span>')
+      .replace(/\\frac\{(.*?)\}\{(.*?)\}/g, '($1/$2)')
+      .replace(/\\sqrt\{(.*?)\}/g, '√($1)')
+      .replace(/\\times/g, '×')
+      .replace(/\\div/g, '÷')
+      .replace(/\\pm/g, '±')
+      .replace(/\\neq/g, '≠')
+      .replace(/\\le/g, '≤')
+      .replace(/\\ge/g, '≥')
+      .replace(/\\infty/g, '∞')
+      .replace(/\\pi/g, 'π')
+      .replace(/\\alpha/g, 'α')
+      .replace(/\\beta/g, 'β')
+      .replace(/\\gamma/g, 'γ')
+      .replace(/\\theta/g, 'θ')
+      .replace(/\\Delta/g, 'Δ')
+      .replace(/\\sum/g, 'Σ')
+      .replace(/\\int/g, '∫')
+      .replace(/\\to/g, '→')
+      .replace(/\\rightarrow/g, '→')
+      .replace(/\\leftarrow/g, '←')
+      .replace(/\\cdot/g, '·')
+      .replace(/\\dots/g, '…')
+      .replace(/\\ldots/g, '…')
+      .replace(/\\cdots/g, '⋯');
+    return <span dangerouslySetInnerHTML={{ __html: processed }} />;
   };
 
   const renderQuestionCard = (q: any, showAnswer = true, selectable = false) => (
@@ -278,7 +306,7 @@ export default function Questions() {
                 return opts.map((opt: any) => (
                   <div key={opt.label} className="flex items-center gap-2 text-sm">
                     <span className="font-medium text-primary">{opt.label}.</span>
-                    <span>{opt.text}</span>
+                    <span>{renderLatexText(opt.text)}</span>
                   </div>
                 ));
               } catch {
@@ -519,49 +547,24 @@ export default function Questions() {
             )}
 
             {/* 识别参数 */}
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-sm font-medium">题型</label>
-                <Select
-                  value={recForm.questionType}
-                  onValueChange={(v) => setRecForm({ ...recForm, questionType: v as any })}
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="single_choice">单选题</SelectItem>
-                    <SelectItem value="multiple_choice">多选题</SelectItem>
-                    <SelectItem value="fill_blank">填空题</SelectItem>
-                    <SelectItem value="short_answer">简答题</SelectItem>
-                    <SelectItem value="mixed">混合题型</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-sm font-medium">数量</label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={recForm.count}
-                  onChange={(e) => setRecForm({ ...recForm, count: parseInt(e.target.value) || 5 })}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">难度</label>
-                <Select
-                  value={String(recForm.difficulty)}
-                  onValueChange={(v) => setRecForm({ ...recForm, difficulty: parseInt(v) })}
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">简单</SelectItem>
-                    <SelectItem value="2">较易</SelectItem>
-                    <SelectItem value="3">中等</SelectItem>
-                    <SelectItem value="4">较难</SelectItem>
-                    <SelectItem value="5">困难</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div>
+              <label className="text-sm font-medium">题型</label>
+              <Select
+                value={recForm.questionType}
+                onValueChange={(v) => setRecForm({ ...recForm, questionType: v as any })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="single_choice">单选题</SelectItem>
+                  <SelectItem value="multiple_choice">多选题</SelectItem>
+                  <SelectItem value="fill_blank">填空题</SelectItem>
+                  <SelectItem value="short_answer">简答题</SelectItem>
+                  <SelectItem value="mixed">混合题型</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                AI 会自动识别文档中所有符合条件的题目，并判断每道题的难度
+              </p>
             </div>
 
             <Button
@@ -597,7 +600,7 @@ export default function Questions() {
                               return opts.map((opt: any) => (
                                 <div key={opt.label} className="flex items-center gap-2 text-sm">
                                   <span className="font-medium text-primary">{opt.label}.</span>
-                                  <span>{opt.text}</span>
+                                  {renderLatexText(opt.text)}
                                 </div>
                               ));
                             } catch {
@@ -661,7 +664,7 @@ export default function Questions() {
                         }`}
                       >
                         <span className="font-medium text-primary mr-2">{opt.label}.</span>
-                        {opt.text}
+                        {renderLatexText(opt.text)}
                       </button>
                     ));
                   } catch {

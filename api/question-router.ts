@@ -123,8 +123,6 @@ export const questionRouter = createRouter({
       z.object({
         urls: z.array(z.string().url()).min(1).max(5),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("single_choice"),
-        count: z.number().min(1).max(20).default(5),
-        difficulty: z.number().min(1).max(5).default(3),
         subjectId: z.number().optional(),
         nodeId: z.number().optional(),
         skillId: z.number().optional(),
@@ -140,8 +138,6 @@ export const questionRouter = createRouter({
       const result = await recognizeQuestionsFromUrls(
         input.urls,
         input.questionType,
-        input.count,
-        input.difficulty,
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined

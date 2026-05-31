@@ -1153,8 +1153,6 @@ ${qaPairs}`;
 export async function recognizeQuestionsFromUrls(
   urls: string[],
   questionType: string,
-  count: number,
-  difficulty: number,
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
@@ -1185,11 +1183,13 @@ export async function recognizeQuestionsFromUrls(
 
 要求：
 1. 从文档/图片中尽可能提取完整的题目内容
-2. 选择题必须有4个选项（A/B/C/D）
+2. 选择题必须有4个选项（A/B/C/D），选项内容要完整准确
 3. 提供详细的答案解析
-4. 每道题标注难度(1-5)
+4. 每道题标注难度(1-5)，由你根据题目实际难度判断
 5. 如果文档中有表格、图片等无法直接读取的内容，请用文本描述替代
 6. mixed模式下，必须混合至少2种不同题型
+7. **数量由文档中实际包含的题目数量决定，请识别出所有能看清的题目**
+8. 如果文档中某道题不完整或看不清，请跳过该题
 
 请返回JSON格式：
 {
@@ -1217,7 +1217,7 @@ export async function recognizeQuestionsFromUrls(
     return { type: "file_url", file_url: { url } };
   });
 
-  const userPrompt = `请从以下文件中识别出 ${count} 道 ${typeDesc}，难度要求 ${difficulty}/5。`;
+  const userPrompt = `请从以下文件中识别出所有${typeDesc}，每道题标注难度(1-5)。如果文档中有多个题目，请全部识别出来。`;
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
