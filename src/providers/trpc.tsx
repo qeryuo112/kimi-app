@@ -23,16 +23,12 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      // 通过 maxURLLength 间接控制超时不太可行，改用 fetch 选项
       fetch(input, init) {
-        // 为请求添加 120 秒超时
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
-
         return globalThis.fetch(input, {
           ...(init ?? {}),
           credentials: "include",
-          signal: controller.signal,
-        }).finally(() => clearTimeout(timeoutId));
+        });
       },
     }),
   ],
