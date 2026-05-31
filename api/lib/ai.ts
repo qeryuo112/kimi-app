@@ -14,7 +14,21 @@ export interface ImageUrlContent {
   };
 }
 
-export type KimiContent = TextContent | ImageUrlContent;
+export interface FileUrlContent {
+  type: "file_url";
+  file_url: {
+    url: string;
+  };
+}
+
+export interface VideoUrlContent {
+  type: "video_url";
+  video_url: {
+    url: string;
+  };
+}
+
+export type KimiContent = TextContent | ImageUrlContent | FileUrlContent | VideoUrlContent;
 
 export interface KimiMessage {
   role: "system" | "user" | "assistant";
@@ -1132,6 +1146,94 @@ ${qaPairs}`;
       suggestions: mastery < 70 ? ["建议重新复习相关知识点", "多做练习题巩固"] : ["继续保持，定期复习"],
       weakPoints: [],
     };
+  }
+}
+
+// 从文件/图片 URL 中识别题目
+export async function recognizeQuestionsFromUrls(
+  urls: string[],
+  questionType: string,
+  count: number,
+  difficulty: number,
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  questions: Array<{
+    content: string;
+    options?: Array<{ label: string; text: string }>;
+    correctAnswer: string;
+    explanation: string;
+    difficulty: number;
+    imageUrl?: string;
+  }>;
+}> {
+  const typeDesc =
+    questionType === "mixed"
+      ? "混合题型（自动混合单选、多选、填空、简答等）"
+      : questionType === "single_choice"
+        ? "单选题"
+        : questionType === "multiple_choice"
+          ? "多选题"
+          : questionType === "fill_blank"
+            ? "填空题"
+            : questionType === "short_answer"
+              ? "简答题"
+              : "论述题";
+
+  const systemPrompt = `你是一个专业的题目识别AI。请仔细阅读用户提供的文件或图片，识别出其中的练习题，并以结构化JSON格式返回。
+
+要求：
+1. 从文档/图片中尽可能提取完整的题目内容
+2. 选择题必须有4个选项（A/B/C/D）
+3. 提供详细的答案解析
+4. 每道题标注难度(1-5)
+5. 如果文档中有表格、图片等无法直接读取的内容，请用文本描述替代
+6. mixed模式下，必须混合至少2种不同题型
+
+请返回JSON格式：
+{
+  "questions": [
+    {
+      "content": "题目内容",
+      "options": [{"label": "A", "text": "选项A"}, {"label": "B", "text": "选项B"}, {"label": "C", "text": "选项C"}, {"label": "D", "text": "选项D"}],
+      "correctAnswer": "A",
+      "explanation": "解析",
+      "difficulty": 3
+    }
+  ]
+}`;
+
+  const contentBlocks: KimiContent[] = urls.map((url) => {
+    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+    const videoExts = ["mp4", "mov", "avi", "mkv", "webm"];
+    if (imageExts.includes(ext)) {
+      return { type: "image_url", image_url: { url } };
+    }
+    if (videoExts.includes(ext)) {
+      return { type: "video_url", video_url: { url } };
+    }
+    return { type: "file_url", file_url: { url } };
+  });
+
+  const userPrompt = `请从以下文件中识别出 ${count} 道 ${typeDesc}，难度要求 ${difficulty}/5。`;
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: [...contentBlocks, { type: "text", text: userPrompt }],
+    },
+  ];
+
+  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true);
+
+  try {
+    const parsed = JSON.parse(result);
+    return { questions: parsed.questions || [] };
+  } catch {
+    throw new Error("AI返回的题目数据格式不正确");
   }
 }
 

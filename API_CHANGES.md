@@ -80,6 +80,34 @@
 
 ---
 
+## 五、新增文档识别出题功能（2026-05-31 后续）
+
+### 新增文件
+- `upload-server/server.js` — 极简文件上传服务（部署到VPS）
+- `upload-server/package.json` — 上传服务依赖
+
+### 修改的文件
+- `api/lib/ai.ts` — 扩展 `KimiContent` 支持 `file_url`/`video_url`，新增 `recognizeQuestionsFromUrls`
+- `api/question-router.ts` — 新增 `question.recognizeFromUrls` 端点
+- `api/settings-router.ts` — `update` 输入新增 `fileServerUrl`
+- `db/schema.ts` — `user_settings` 表新增 `fileServerUrl` 字段
+- `src/pages/Settings.tsx` — 新增文件上传服务器地址配置
+- `src/pages/Questions.tsx` — 新增"文档识别"面板，支持文件上传/URL粘贴、AI识别、结果预览
+
+### 新增的 tRPC 端点
+| 端点 | 说明 |
+|------|------|
+| `question.recognizeFromUrls` | 接收文件URL数组，调用AI识别文档/图片中的题目并保存 |
+
+### 数据库迁移
+- `db/migrations/0006_reflective_bloodstrike.sql` — user_settings 表新增 fileServerUrl 列
+
+### 外部服务
+- VPS 上需部署 `upload-server`（`node server.js`），提供 `/upload` 接口和静态文件服务
+- 前端在 Settings 中配置 VPS 地址（如 `http://VPS_IP:3001`）后，文档识别面板可将文件上传至 VPS 获取公网URL
+
+---
+
 ## 四、回退方式
 
 如需回退本次变更，执行：

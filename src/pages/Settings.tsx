@@ -45,6 +45,7 @@ export default function SettingsPage() {
     aiModel: "kimi",
     aiApiKey: "",
     aiApiEndpoint: "",
+    fileServerUrl: "",
     dailyGoal: 120,
     weekGoal: 600,
     notifications: true,
@@ -58,6 +59,7 @@ export default function SettingsPage() {
         aiModel: settings.aiModel || "kimi",
         aiApiKey: settings.aiApiKey || "",
         aiApiEndpoint: settings.aiApiEndpoint || "",
+        fileServerUrl: settings.fileServerUrl || "",
         dailyGoal: settings.dailyGoal || 120,
         weekGoal: settings.weekGoal || 600,
         notifications: settings.notifications ?? true,
@@ -210,6 +212,20 @@ export default function SettingsPage() {
                   </div>
                 </div>
               )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  文件上传服务器地址
+                </label>
+                <Input
+                  placeholder="http://你的VPS_IP:3001（用于文档识别上传）"
+                  value={form.fileServerUrl}
+                  onChange={(e) => setForm({ ...form, fileServerUrl: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  配置后，文档识别功能会将文件上传到此服务器并获取公网URL供AI读取。未配置时可在识别面板手动粘贴URL。
+                </p>
+              </div>
             </CardContent>
           </Card>
 

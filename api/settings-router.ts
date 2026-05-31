@@ -41,6 +41,7 @@ export const settingsRouter = createRouter({
         aiModel: z.string().optional(),
         aiApiKey: z.string().optional(),
         aiApiEndpoint: z.string().optional(),
+        fileServerUrl: z.string().optional(),
         defaultDifficulty: z.number().min(1).max(5).optional(),
         dailyGoal: z.number().optional(),
         weekGoal: z.number().optional(),

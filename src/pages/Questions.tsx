@@ -26,6 +26,10 @@ import {
   AlertTriangle,
   RotateCcw,
   X,
+  Upload,
+  Link,
+  Trash2,
+  FileText,
 } from "lucide-react";
 
 export default function Questions() {
@@ -36,6 +40,7 @@ export default function Questions() {
 
   const [activeTab, setActiveTab] = useState("all");
   const [showGenerate, setShowGenerate] = useState(false);
+  const [showRecognize, setShowRecognize] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
   const [userAnswer, setUserAnswer] = useState("");
   const [answerResult, setAnswerResult] = useState<any>(null);
@@ -47,6 +52,31 @@ export default function Questions() {
     questionType: "single_choice" as const,
     count: 5,
     difficulty: 3,
+  });
+
+  // 文档识别状态
+  const [recForm, setRecForm] = useState({
+    questionType: "single_choice" as const,
+    count: 5,
+    difficulty: 3,
+  });
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
+  const [recognizedQuestions, setRecognizedQuestions] = useState<any[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [manualUrl, setManualUrl] = useState("");
+
+  const { data: settings } = trpc.settings.get.useQuery();
+
+  // 文档识别
+  const recognizeFromUrls = trpc.question.recognizeFromUrls.useMutation({
+    onSuccess: (data) => {
+      toast.success(`成功识别 ${data.questions?.length || 0} 道题目`);
+      setRecognizedQuestions(data.questions || []);
+      utils.question.list.invalidate();
+    },
+    onError: (err) => {
+      toast.error(err.message || "识别失败");
+    },
   });
 
   // AI出题
@@ -100,6 +130,67 @@ export default function Questions() {
   const handleGenerate = () => {
     if (!genForm.topic.trim()) return;
     aiGenerate.mutate(genForm);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileServerUrl = settings?.fileServerUrl?.trim();
+    if (!fileServerUrl) {
+      toast.error("请先在设置中配置文件上传服务器地址");
+      return;
+    }
+
+    setIsUploading(true);
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast.error(`上传失败: ${err.error || res.statusText}`);
+          continue;
+        }
+        const data = await res.json();
+        if (data.url) {
+          setUploadedFiles((prev) => [...prev, { url: data.url, name: file.name }]);
+          toast.success(`${file.name} 上传成功`);
+        }
+      } catch (err: any) {
+        toast.error(`上传失败: ${err.message}`);
+      }
+    }
+    setIsUploading(false);
+    e.target.value = "";
+  };
+
+  const handleAddManualUrl = () => {
+    const url = manualUrl.trim();
+    if (!url) return;
+    if (!url.startsWith("http")) {
+      toast.error("请输入有效的 http/https URL");
+      return;
+    }
+    setUploadedFiles((prev) => [...prev, { url, name: url.split("/").pop() || "外部文件" }]);
+    setManualUrl("");
+  };
+
+  const handleRecognize = () => {
+    if (uploadedFiles.length === 0) {
+      toast.error("请先上传文件或添加文件URL");
+      return;
+    }
+    recognizeFromUrls.mutate({
+      urls: uploadedFiles.map((f) => f.url),
+      questionType: recForm.questionType,
+      count: recForm.count,
+      difficulty: recForm.difficulty,
+    });
   };
 
   const handleAnswer = () => {
@@ -226,6 +317,10 @@ export default function Questions() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowRecognize(!showRecognize)}>
+            <Upload className="h-4 w-4 mr-1" />
+            文档识别
+          </Button>
           <Button onClick={() => setShowGenerate(!showGenerate)}>
             <Plus className="h-4 w-4 mr-1" />
             AI出题
@@ -348,6 +443,182 @@ export default function Questions() {
               {aiGenerate.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Sparkles className="h-4 w-4 mr-1" />}
               生成题目
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 文档识别面板 */}
+      {showRecognize && (
+        <Card className="mb-6 border-primary/30">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <FileText className="h-4 w-4 text-primary" />
+              文档识别出题
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* 文件上传 */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">上传文件</label>
+              <div className="flex items-center gap-2">
+                <label className="flex-1">
+                  <Input
+                    type="file"
+                    multiple
+                    accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                    onChange={handleFileUpload}
+                    disabled={isUploading}
+                  />
+                </label>
+                {isUploading && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                支持 PDF、Word、TXT、PNG、JPG。文件将上传到你配置的文件服务器供AI读取。
+              </p>
+            </div>
+
+            {/* 手动添加URL */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium flex items-center gap-1">
+                <Link className="h-3.5 w-3.5" />
+                或手动添加文件URL
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://example.com/file.pdf"
+                  value={manualUrl}
+                  onChange={(e) => setManualUrl(e.target.value)}
+                />
+                <Button variant="outline" onClick={handleAddManualUrl}>添加</Button>
+              </div>
+            </div>
+
+            {/* 已上传文件列表 */}
+            {uploadedFiles.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">已添加的文件 ({uploadedFiles.length})</label>
+                <div className="space-y-1">
+                  {uploadedFiles.map((file, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 rounded bg-secondary/30 border border-border">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-sm truncate">{file.name}</span>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0 text-red-400"
+                        onClick={() => setUploadedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 识别参数 */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-sm font-medium">题型</label>
+                <Select
+                  value={recForm.questionType}
+                  onValueChange={(v) => setRecForm({ ...recForm, questionType: v as any })}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single_choice">单选题</SelectItem>
+                    <SelectItem value="multiple_choice">多选题</SelectItem>
+                    <SelectItem value="fill_blank">填空题</SelectItem>
+                    <SelectItem value="short_answer">简答题</SelectItem>
+                    <SelectItem value="mixed">混合题型</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">数量</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={recForm.count}
+                  onChange={(e) => setRecForm({ ...recForm, count: parseInt(e.target.value) || 5 })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">难度</label>
+                <Select
+                  value={String(recForm.difficulty)}
+                  onValueChange={(v) => setRecForm({ ...recForm, difficulty: parseInt(v) })}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">简单</SelectItem>
+                    <SelectItem value="2">较易</SelectItem>
+                    <SelectItem value="3">中等</SelectItem>
+                    <SelectItem value="4">较难</SelectItem>
+                    <SelectItem value="5">困难</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleRecognize}
+              disabled={recognizeFromUrls.isPending || uploadedFiles.length === 0}
+              className="w-full"
+            >
+              {recognizeFromUrls.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-1" />
+              )}
+              开始识别
+            </Button>
+
+            {/* 识别结果预览 */}
+            {recognizedQuestions.length > 0 && (
+              <div className="space-y-3 pt-2 border-t border-border">
+                <p className="text-sm font-medium">识别结果预览（已自动保存到题库）</p>
+                {recognizedQuestions.map((q, idx) => (
+                  <Card key={idx} className="border-border/50">
+                    <CardContent className="pt-4">
+                      <div className="flex gap-2 mb-2">
+                        <Badge variant="outline">{questionTypeMap[q.questionType] || q.questionType}</Badge>
+                        <Badge className={difficultyMap[q.difficulty]?.color || ""}>{difficultyMap[q.difficulty]?.label || `难度${q.difficulty}`}</Badge>
+                      </div>
+                      <p className="text-sm font-medium mb-2">{q.content}</p>
+                      {q.options && (
+                        <div className="space-y-1 mb-2">
+                          {(() => {
+                            try {
+                              const opts = typeof q.options === "string" ? JSON.parse(q.options) : q.options;
+                              return opts.map((opt: any) => (
+                                <div key={opt.label} className="flex items-center gap-2 text-sm">
+                                  <span className="font-medium text-primary">{opt.label}.</span>
+                                  <span>{opt.text}</span>
+                                </div>
+                              ));
+                            } catch {
+                              return null;
+                            }
+                          })()}
+                        </div>
+                      )}
+                      <div className="text-sm text-muted-foreground">
+                        <span className="font-medium text-green-400">答案：</span>{q.correctAnswer}
+                      </div>
+                      {q.explanation && (
+                        <div className="text-sm text-muted-foreground mt-1">
+                          <span className="font-medium">解析：</span>{q.explanation}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

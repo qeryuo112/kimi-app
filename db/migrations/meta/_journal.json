@@ -43,6 +43,13 @@
       "when": 1780144054483,
       "tag": "0005_yielding_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1780240631519,
+      "tag": "0006_reflective_bloodstrike",
+      "breakpoints": true
     }
   ]
 }

@@ -211,6 +211,7 @@ export const userSettings = mysqlTable("user_settings", {
   aiModel: varchar("aiModel", { length: 100 }).default("kimi"),
   aiApiKey: text("aiApiKey"), // 用户自定义API Key
   aiApiEndpoint: text("aiApiEndpoint"), // 自定义API端点
+  fileServerUrl: text("fileServerUrl"), // 文件上传服务器地址（如 http://VPS_IP:3001）
   defaultDifficulty: int("defaultDifficulty").default(3).notNull(),
   dailyGoal: int("dailyGoal").default(120).notNull(), // 每日目标(分钟)
   weekGoal: int("weekGoal").default(600).notNull(), // 每周目标(分钟)
