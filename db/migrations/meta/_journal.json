@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1780106978937,
+      "tag": "0000_many_roxanne_simpson",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1780112424540,
+      "tag": "0001_add_plans_questions_wrongbooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1780133005299,
+      "tag": "0002_add_plan_months_rounds",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1780133920240,
+      "tag": "0003_add_todos_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1780135641253,
+      "tag": "0004_add_todo_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1780144054483,
+      "tag": "0005_yielding_the_fury",
+      "breakpoints": true
+    }
+  ]
+}

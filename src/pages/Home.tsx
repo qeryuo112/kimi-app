@@ -13,6 +13,9 @@ import {
   Flame,
   BrainCircuit,
   ArrowUpRight,
+  CheckSquare,
+  CheckCircle2,
+  RefreshCw,
 } from "lucide-react";
 import {
   RadarChart,
@@ -55,6 +58,14 @@ export default function Home() {
     { limit: 5 },
     { enabled: isAuthenticated }
   );
+
+  const { data: todayData } = trpc.todo.getToday.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+
+  const { data: reviews } = trpc.todo.getReviews.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
 
   if (authLoading || !isAuthenticated) {
     return (
@@ -153,6 +164,113 @@ export default function Home() {
           loading={isLoading}
           link="/knowledge"
         />
+      </div>
+
+      {/* 今日任务 + 复习提醒 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="glass glow-card border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CheckSquare className="h-4 w-4 text-primary" />
+              今日任务
+              {todayData?.summary && todayData.summary.totalCount > 0 && (
+                <Badge variant="outline" className="text-[10px]">
+                  {todayData.summary.completedCount}/{todayData.summary.totalCount}
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!todayData || todayData.todos.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground">
+                <CheckSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">暂无今日任务</p>
+                <Link to="/plans" className="text-xs text-primary hover:underline">前往学习计划生成</Link>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {todayData.todos.slice(0, 5).map((todo) => (
+                  <div
+                    key={todo.id}
+                    className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
+                      todo.status === "completed" ? "bg-green-500/5" : "bg-secondary/30"
+                    }`}
+                  >
+                    {todo.status === "completed" ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-400 flex-shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border-2 border-primary flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className={`truncate ${todo.status === "completed" ? "line-through text-muted-foreground" : ""}`}>
+                        {todo.subject} · {todo.focus}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground flex-shrink-0">{todo.estimatedMinutes}分钟</span>
+                  </div>
+                ))}
+                {todayData.todos.length > 5 && (
+                  <Link to="/todos" className="text-xs text-primary hover:underline block text-center mt-1">
+                    查看全部 {todayData.todos.length} 个任务
+                  </Link>
+                )}
+                {todayData.summary && todayData.summary.totalCount > 0 && (
+                  <div className="mt-2 pt-2 border-t border-border">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>完成进度</span>
+                      <span>{todayData.summary.progress}%</span>
+                    </div>
+                    <div className="h-1.5 bg-secondary rounded-full mt-1 overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all"
+                        style={{ width: `${todayData.summary.progress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="glass glow-card border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <RefreshCw className="h-4 w-4 text-primary" />
+              复习提醒
+              {reviews && reviews.length > 0 && (
+                <Badge variant="outline" className="text-[10px]">{reviews.length} 个</Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!reviews || reviews.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground">
+                <RefreshCw className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">今日暂无复习任务</p>
+                <p className="text-xs">完成学习任务后自动安排复习</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {reviews.slice(0, 5).map((rev) => (
+                  <div key={rev.id} className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30 text-sm">
+                    <RefreshCw className="h-4 w-4 text-purple-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="truncate">{rev.nodeTitle}</p>
+                      <p className="text-xs text-muted-foreground">{rev.subjectTitle}</p>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] flex-shrink-0">{rev.mastery}%</Badge>
+                  </div>
+                ))}
+                {reviews.length > 5 && (
+                  <Link to="/todos" className="text-xs text-primary hover:underline block text-center mt-1">
+                    查看全部 {reviews.length} 个复习
+                  </Link>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* 图表区域 */}

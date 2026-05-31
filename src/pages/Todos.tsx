@@ -1,0 +1,516 @@
+import { useState } from "react";
+import { trpc } from "@/providers/trpc";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  CheckCircle2,
+  Circle,
+  Clock,
+  BrainCircuit,
+  Zap,
+  RefreshCw,
+  SkipForward,
+  Loader2,
+  CalendarDays,
+  Target,
+  AlertTriangle,
+  XCircle,
+  Trash2,
+} from "lucide-react";
+
+interface TestQuestion {
+  id: string;
+  content: string;
+  options?: Array<{ label: string; text: string }>;
+  correctAnswer: string;
+  explanation: string;
+  knowledgePoint: string;
+}
+
+export default function Todos() {
+  const utils = trpc.useUtils();
+  const { data: todayData, isLoading } = trpc.todo.getToday.useQuery();
+  const { data: history } = trpc.todo.list.useQuery({ limit: 30 });
+  const { data: reviews } = trpc.todo.getReviews.useQuery();
+
+  // 测试题弹窗状态
+  const [testOpen, setTestOpen] = useState(false);
+  const [activeTodoId, setActiveTodoId] = useState<number | null>(null);
+  const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
+  const [testAnswers, setTestAnswers] = useState<Record<string, string>>({});
+  const [actualMinutes, setActualMinutes] = useState(30);
+  const [testStep, setTestStep] = useState<"loading" | "testing" | "result">("loading");
+  const [testResult, setTestResult] = useState<any>(null);
+
+  const generateTest = trpc.todo.generateTest.useMutation({
+    onSuccess: (data) => {
+      setTestQuestions(data.questions);
+      setTestAnswers({});
+      setTestStep("testing");
+    },
+    onError: (err) => {
+      setTestOpen(false);
+      alert(err.message);
+    },
+  });
+
+  const submitTest = trpc.todo.submitTest.useMutation({
+    onSuccess: (data) => {
+      setTestResult(data);
+      setTestStep("result");
+      utils.todo.getToday.invalidate();
+      utils.todo.getReviews.invalidate();
+      utils.todo.list.invalidate();
+    },
+    onError: (err) => {
+      alert(err.message);
+    },
+  });
+
+  const skipTodo = trpc.todo.skip.useMutation({
+    onSuccess: () => utils.todo.getToday.invalidate(),
+  });
+
+  const deleteTodo = trpc.todo.delete.useMutation({
+    onSuccess: async () => {
+      await utils.todo.getToday.refetch();
+      await utils.todo.list.refetch();
+      await utils.todo.getReviews.refetch();
+      await utils.study.getStats.refetch();
+      await utils.study.list.refetch();
+      toast.success("任务已删除，数据已回退");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleStartTest = (todoId: number) => {
+    setActiveTodoId(todoId);
+    setTestOpen(true);
+    setTestStep("loading");
+    generateTest.mutate({ id: todoId });
+  };
+
+  const handleSubmitTest = () => {
+    if (!activeTodoId) return;
+    const unanswered = testQuestions.filter((q) => !testAnswers[q.id]);
+    if (unanswered.length > 0) {
+      if (!confirm(`还有 ${unanswered.length} 道题未作答，确定提交吗？`)) return;
+    }
+
+    submitTest.mutate({
+      id: activeTodoId,
+      actualMinutes,
+      questions: testQuestions.map((q) => ({
+        id: q.id,
+        content: q.content,
+        correctAnswer: q.correctAnswer,
+        explanation: q.explanation,
+        knowledgePoint: q.knowledgePoint,
+      })),
+      answers: testQuestions.map((q) => ({
+        questionId: q.id,
+        userAnswer: testAnswers[q.id] || "",
+      })),
+    });
+  };
+
+  const statusIcon = (status: string) => {
+    if (status === "completed") return <CheckCircle2 className="h-5 w-5 text-green-400" />;
+    if (status === "skipped") return <SkipForward className="h-5 w-5 text-muted-foreground" />;
+    return <Circle className="h-5 w-5 text-primary" />;
+  };
+
+  const statusBadge = (status: string) => {
+    if (status === "completed") return <Badge className="bg-green-500/20 text-green-400">已完成</Badge>;
+    if (status === "skipped") return <Badge variant="outline">已跳过</Badge>;
+    return <Badge variant="outline" className="bg-primary/10 text-primary">待完成</Badge>;
+  };
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto">
+      {/* 头部 */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Target className="h-6 w-6 text-primary" />
+            今日任务
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            {new Date().toLocaleDateString("zh-CN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+          </p>
+        </div>
+        {todayData?.summary && (
+          <div className="text-right">
+            <p className="text-2xl font-bold">{todayData.summary.progress}%</p>
+            <p className="text-xs text-muted-foreground">完成进度</p>
+          </div>
+        )}
+      </div>
+
+      {/* 统计卡片 */}
+      {todayData?.summary && (
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <Card><CardContent className="pt-4 text-center"><Clock className="h-5 w-5 text-primary mx-auto mb-1" /><p className="text-2xl font-bold">{todayData.summary.totalCount}</p><p className="text-xs text-muted-foreground">总任务</p></CardContent></Card>
+          <Card><CardContent className="pt-4 text-center"><CheckCircle2 className="h-5 w-5 text-green-400 mx-auto mb-1" /><p className="text-2xl font-bold">{todayData.summary.completedCount}</p><p className="text-xs text-muted-foreground">已完成</p></CardContent></Card>
+          <Card><CardContent className="pt-4 text-center"><Zap className="h-5 w-5 text-yellow-400 mx-auto mb-1" /><p className="text-2xl font-bold">{todayData.summary.completedMinutes}</p><p className="text-xs text-muted-foreground">已学习(分钟)</p></CardContent></Card>
+          <Card><CardContent className="pt-4 text-center"><BrainCircuit className="h-5 w-5 text-purple-400 mx-auto mb-1" /><p className="text-2xl font-bold">{reviews?.length || 0}</p><p className="text-xs text-muted-foreground">待复习</p></CardContent></Card>
+        </div>
+      )}
+
+      <Tabs defaultValue="today">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="today">今日任务</TabsTrigger>
+          <TabsTrigger value="reviews">复习提醒</TabsTrigger>
+          <TabsTrigger value="history">历史记录</TabsTrigger>
+        </TabsList>
+
+        {/* 今日任务 */}
+        <TabsContent value="today" className="space-y-3 mt-4">
+          {isLoading ? (
+            <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+          ) : !todayData || todayData.todos.length === 0 ? (
+            <Card className="text-center py-12">
+              <CardContent>
+                <CalendarDays className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">暂无今日任务</h3>
+                <p className="text-muted-foreground text-sm mb-4">前往「学习计划」页面，选择一个计划生成今日任务</p>
+              </CardContent>
+            </Card>
+          ) : (
+            todayData.todos.map((todo) => (
+              <Card key={todo.id} className={todo.status === "completed" ? "border-green-500/30" : ""}>
+                <CardContent className="pt-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5">{statusIcon(todo.status)}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{todo.subject}</span>
+                          {statusBadge(todo.status)}
+                        </div>
+                        <Badge variant="outline">{todo.estimatedMinutes}分钟</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">{todo.focus}</p>
+                      {(() => {
+                        try {
+                          const nodes = JSON.parse(todo.knowledgeNodes || "[]");
+                          return (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {nodes.map((n: string, i: number) => (
+                                <Badge key={i} variant="secondary" className="text-[10px]">{n}</Badge>
+                              ))}
+                            </div>
+                          );
+                        } catch { return null; }
+                      })()}
+
+                      {todo.status === "completed" && todo.aiEvaluation && (
+                        <div className="mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
+                          <div className="flex items-center gap-2">
+                            <BrainCircuit className="h-3.5 w-3.5 text-green-400" />
+                            <span className="text-xs font-medium text-green-400">AI考官评估</span>
+                            <Badge variant="outline" className="text-[10px]">掌握度 {todo.aiMastery}%</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">{todo.aiEvaluation}</p>
+                        </div>
+                      )}
+
+                      {todo.status === "completed" && (
+                        <div className="flex justify-end mt-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-7 px-2"
+                            onClick={() => {
+                              if (confirm("确定要删除此任务吗？删除后会回退所有相关数据（掌握度、进度、技能等级、学习统计、复习调度）。")) {
+                                deleteTodo.mutate({ id: todo.id });
+                              }
+                            }}
+                            disabled={deleteTodo.isPending}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            删除并回退数据
+                          </Button>
+                        </div>
+                      )}
+
+                      {todo.status === "pending" && (
+                        <div className="flex gap-2 mt-3">
+                          <Button size="sm" onClick={() => handleStartTest(todo.id)}>
+                            <BrainCircuit className="h-3.5 w-3.5 mr-1" />
+                            完成（AI测试）
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => skipTodo.mutate({ id: todo.id })}>
+                            <SkipForward className="h-3.5 w-3.5 mr-1" />
+                            跳过
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-8 px-2"
+                            onClick={() => {
+                              if (confirm("确定要删除此任务吗？")) {
+                                deleteTodo.mutate({ id: todo.id });
+                              }
+                            }}
+                            disabled={deleteTodo.isPending}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
+
+                      {todo.status === "skipped" && (
+                        <div className="flex justify-end mt-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-7 px-2"
+                            onClick={() => {
+                              if (confirm("确定要删除此任务吗？")) {
+                                deleteTodo.mutate({ id: todo.id });
+                              }
+                            }}
+                            disabled={deleteTodo.isPending}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            删除任务
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </TabsContent>
+
+        {/* 复习提醒 */}
+        <TabsContent value="reviews" className="space-y-3 mt-4">
+          {!reviews || reviews.length === 0 ? (
+            <Card className="text-center py-12">
+              <CardContent>
+                <RefreshCw className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">暂无复习任务</h3>
+                <p className="text-muted-foreground text-sm">完成学习任务后，系统会自动安排复习</p>
+              </CardContent>
+            </Card>
+          ) : (
+            reviews.map((rev) => (
+              <Card key={rev.id}>
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{rev.nodeTitle}</p>
+                      <p className="text-sm text-muted-foreground">{rev.subjectTitle}</p>
+                    </div>
+                    <div className="text-right">
+                      <Badge variant="outline">第{rev.reviewCount + 1}次复习</Badge>
+                      <p className="text-xs text-muted-foreground mt-1">掌握度 {rev.mastery}%</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">首次学习：{rev.originalStudyDate} · 间隔 {rev.intervalDays} 天</p>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </TabsContent>
+
+        {/* 历史记录 */}
+        <TabsContent value="history" className="space-y-3 mt-4">
+          {!history || history.length === 0 ? (
+            <p className="text-center text-muted-foreground py-12">暂无历史记录</p>
+          ) : (
+            history.map((h) => (
+              <Card key={h.id}>
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {statusIcon(h.status)}
+                      <span className="font-medium">{h.subject}</span>
+                      {statusBadge(h.status)}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">{h.date}</span>
+                      {h.status === "completed" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-6 px-1.5"
+                          onClick={() => {
+                            if (confirm("确定要删除此任务吗？删除后会回退所有相关数据。")) {
+                              deleteTodo.mutate({ id: h.id });
+                            }
+                          }}
+                          disabled={deleteTodo.isPending}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">{h.focus}</p>
+                  {h.aiMastery !== null && h.aiMastery > 0 && (
+                    <Badge variant="outline" className="mt-1 text-[10px]">掌握度 {h.aiMastery}%</Badge>
+                  )}
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* AI考官测试弹窗 */}
+      <Dialog open={testOpen} onOpenChange={setTestOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BrainCircuit className="h-5 w-5 text-primary" />
+              AI考官测试
+            </DialogTitle>
+          </DialogHeader>
+
+          {testStep === "loading" && (
+            <div className="text-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+              <p className="text-muted-foreground">AI正在出题...</p>
+            </div>
+          )}
+
+          {testStep === "testing" && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                <span>实际学习时长：</span>
+                <Input
+                  type="number"
+                  className="w-20 h-7 text-sm"
+                  value={actualMinutes}
+                  onChange={(e) => setActualMinutes(parseInt(e.target.value) || 0)}
+                />
+                <span>分钟</span>
+              </div>
+
+              {testQuestions.map((q, idx) => (
+                <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
+                  <p className="text-sm font-medium mb-2">
+                    <span className="text-primary mr-1">{idx + 1}.</span>
+                    {q.content}
+                  </p>
+                  {q.options && q.options.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {q.options.map((opt) => (
+                        <button
+                          key={opt.label}
+                          onClick={() => setTestAnswers({ ...testAnswers, [q.id]: opt.label })}
+                          className={`w-full text-left p-2 rounded-lg border text-sm transition-colors ${
+                            testAnswers[q.id] === opt.label
+                              ? "border-primary bg-primary/10"
+                              : "border-border hover:bg-secondary/30"
+                          }`}
+                        >
+                          <span className="font-medium text-primary mr-2">{opt.label}.</span>
+                          {opt.text}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <Input
+                      placeholder="请输入你的答案"
+                      value={testAnswers[q.id] || ""}
+                      onChange={(e) => setTestAnswers({ ...testAnswers, [q.id]: e.target.value })}
+                    />
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-1.5">知识点：{q.knowledgePoint}</p>
+                </div>
+              ))}
+
+              <div className="flex gap-2">
+                <Button className="flex-1" onClick={handleSubmitTest} disabled={submitTest.isPending}>
+                  {submitTest.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                  提交答案
+                </Button>
+                <Button variant="outline" onClick={() => setTestOpen(false)}>取消</Button>
+              </div>
+            </div>
+          )}
+
+          {testStep === "result" && testResult && (
+            <div className="space-y-4">
+              <div className={`p-4 rounded-lg text-center ${testResult.mastery >= 70 ? "bg-green-500/10 border border-green-500/30" : testResult.mastery >= 50 ? "bg-yellow-500/10 border border-yellow-500/30" : "bg-red-500/10 border border-red-500/30"}`}>
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  {testResult.mastery >= 70 ? <CheckCircle2 className="h-6 w-6 text-green-400" /> : <AlertTriangle className="h-6 w-6 text-yellow-400" />}
+                  <span className="text-lg font-bold">掌握度 {testResult.mastery}%</span>
+                </div>
+                <p className="text-sm">{testResult.feedback}</p>
+                <p className="text-xs text-muted-foreground mt-1">答对 {testResult.correctCount}/{testResult.totalCount} 题 · 下次复习：{testResult.nextReviewIn}天后</p>
+              </div>
+
+              {testResult.weakPoints && testResult.weakPoints.length > 0 && (
+                <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                  <p className="text-sm font-medium text-red-400 flex items-center gap-1">
+                    <XCircle className="h-4 w-4" />
+                    薄弱知识点
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {testResult.weakPoints.map((p: string, i: number) => (
+                      <Badge key={i} variant="secondary" className="text-[10px]">{p}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {testResult.suggestions && testResult.suggestions.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">AI建议</p>
+                  {testResult.suggestions.map((s: string, i: number) => (
+                    <p key={i} className="text-xs text-muted-foreground flex items-start gap-1">
+                      <span className="text-primary mt-0.5">•</span>
+                      {s}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {/* 逐题解析 */}
+              <div className="space-y-2 max-h-64 overflow-auto">
+                <p className="text-sm font-medium">题目解析</p>
+                {testQuestions.map((q, idx) => {
+                  const userAns = testAnswers[q.id] || "";
+                  const isCorrect = userAns.trim().toUpperCase() === q.correctAnswer.trim().toUpperCase();
+                  return (
+                    <div key={q.id} className={`p-2 rounded text-sm ${isCorrect ? "bg-green-500/5" : "bg-red-500/5"}`}>
+                      <div className="flex items-center gap-2">
+                        {isCorrect ? <CheckCircle2 className="h-3.5 w-3.5 text-green-400" /> : <XCircle className="h-3.5 w-3.5 text-red-400" />}
+                        <span className="font-medium">{idx + 1}. {q.content}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        你的答案：{userAns || "未作答"} · 正确答案：{q.correctAnswer}
+                      </p>
+                      <p className="text-xs text-primary mt-0.5">{q.explanation}</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <Button className="w-full" onClick={() => { setTestOpen(false); setTestResult(null); }}>
+                完成
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

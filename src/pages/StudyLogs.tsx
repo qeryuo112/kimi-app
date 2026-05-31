@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -33,8 +34,12 @@ import {
   Trash2,
   Flame,
   TrendingUp,
+  Loader2,
   Target,
   CalendarDays,
+  Sparkles,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -96,7 +101,31 @@ export default function StudyLogs() {
     },
   });
 
+  // AI评估学习记录
+  const aiEvaluate = trpc.study.aiEvaluate.useMutation({
+    onSuccess: (data) => {
+      utils.study.list.invalidate();
+      toast.success(`AI评估完成，质量评分: ${data.quality}/5`);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // AI生成测试题
+  const aiGenerateTests = trpc.study.aiGenerateTests.useMutation({
+    onSuccess: (data) => {
+      toast.success(`生成 ${data.questions.length} 道测试题`);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [evaluatingId, setEvaluatingId] = useState<number | null>(null);
+  const [testingId, setTestingId] = useState<number | null>(null);
+  const [testQuestions, setTestQuestions] = useState<any[]>([]);
+  const [currentTestIndex, setCurrentTestIndex] = useState(0);
+  const [testAnswers, setTestAnswers] = useState<Record<number, string>>({});
+  const [testResults, setTestResults] = useState<Record<number, any>>({});
+  const [showTest, setShowTest] = useState(false);
   const [form, setForm] = useState({
     subjectId: undefined as number | undefined,
     title: "",
@@ -370,8 +399,54 @@ export default function StudyLogs() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
                           <h3 className="text-sm font-medium truncate">{log.title}</h3>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
                             <span className={`text-xs ${mood.color}`}>{mood.icon}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => {
+                                setEvaluatingId(log.id);
+                                aiEvaluate.mutate({ id: log.id }, {
+                                  onSettled: () => setEvaluatingId(null),
+                                });
+                              }}
+                              disabled={aiEvaluate.isPending}
+                            >
+                              {evaluatingId === log.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                              ) : (
+                                <Sparkles className="h-3 w-3 mr-1" />
+                              )}
+                              AI评估
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => {
+                                setTestingId(log.id);
+                                aiGenerateTests.mutate({ id: log.id, count: 5 }, {
+                                  onSuccess: (data) => {
+                                    setTestQuestions(data.questions);
+                                    setCurrentTestIndex(0);
+                                    setTestAnswers({});
+                                    setTestResults({});
+                                    setShowTest(true);
+                                    setTestingId(null);
+                                  },
+                                  onError: () => setTestingId(null),
+                                });
+                              }}
+                              disabled={aiGenerateTests.isPending}
+                            >
+                              {testingId === log.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                              ) : (
+                                <Sparkles className="h-3 w-3 mr-1" />
+                              )}
+                              测试
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"
@@ -386,6 +461,12 @@ export default function StudyLogs() {
                             </Button>
                           </div>
                         </div>
+                        {log.aiFeedback && (
+                          <div className="text-xs text-primary/80 mt-0.5 bg-primary/5 p-1.5 rounded">
+                            <span className="font-medium">AI评估：</span>
+                            {log.aiFeedback}
+                          </div>
+                        )}
                         {log.content && (
                           <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
                             {log.content}
@@ -400,6 +481,12 @@ export default function StudyLogs() {
                             <Star className="h-3 w-3" />
                             {"★".repeat(log.quality)}
                           </span>
+                          {log.aiTestScore !== null && log.aiTestScore !== undefined && (
+                            <span className="flex items-center gap-1 text-primary">
+                              <Target className="h-3 w-3" />
+                              测试{log.aiTestScore}分
+                            </span>
+                          )}
                           <span>
                             {new Date(log.date).toLocaleDateString("zh-CN")}
                           </span>
@@ -419,6 +506,121 @@ export default function StudyLogs() {
           </ScrollArea>
         </CardContent>
       </Card>
+
+      {/* 测试题弹窗 */}
+      <Dialog open={showTest} onOpenChange={setShowTest}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              学习质量测试
+            </DialogTitle>
+          </DialogHeader>
+          {testQuestions.length > 0 && currentTestIndex < testQuestions.length ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                <span>题目 {currentTestIndex + 1} / {testQuestions.length}</span>
+                <Badge variant="outline">{testQuestions[currentTestIndex].knowledgePoint}</Badge>
+              </div>
+              <div className="p-4 rounded-lg bg-secondary/30 border border-border">
+                <p className="font-medium mb-3">{testQuestions[currentTestIndex].content}</p>
+                {testQuestions[currentTestIndex].options && (
+                  <div className="space-y-2">
+                    {testQuestions[currentTestIndex].options.map((opt: any) => (
+                      <button
+                        key={opt.label}
+                        onClick={() => {
+                          setTestAnswers({ ...testAnswers, [currentTestIndex]: opt.label });
+                        }}
+                        className={`w-full text-left p-2.5 rounded-lg border transition-colors ${
+                          testAnswers[currentTestIndex] === opt.label
+                            ? "border-primary bg-primary/10"
+                            : "border-border hover:bg-secondary/30"
+                        }`}
+                      >
+                        <span className="font-medium text-primary mr-2">{opt.label}.</span>
+                        {opt.text}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!testQuestions[currentTestIndex].options && (
+                  <Textarea
+                    placeholder="请输入你的答案"
+                    value={testAnswers[currentTestIndex] || ""}
+                    onChange={(e) => setTestAnswers({ ...testAnswers, [currentTestIndex]: e.target.value })}
+                  />
+                )}
+              </div>
+              {testResults[currentTestIndex] && (
+                <div className={`p-3 rounded-lg ${testResults[currentTestIndex].isCorrect ? "bg-green-500/10 border border-green-500/30" : "bg-red-500/10 border border-red-500/30"}`}>
+                  <div className="flex items-center gap-2">
+                    {testResults[currentTestIndex].isCorrect ? (
+                      <CheckCircle className="h-4 w-4 text-green-400" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-400" />
+                    )}
+                    <span className="text-sm font-medium">
+                      {testResults[currentTestIndex].isCorrect ? "正确" : "错误"}
+                    </span>
+                    <Badge variant="outline">掌握度 {testResults[currentTestIndex].mastery}%</Badge>
+                  </div>
+                  <p className="text-sm mt-1">{testResults[currentTestIndex].explanation}</p>
+                </div>
+              )}
+              <div className="flex gap-2">
+                {!testResults[currentTestIndex] ? (
+                  <Button
+                    className="flex-1"
+                    onClick={() => {
+                      const q = testQuestions[currentTestIndex];
+                      const userAns = testAnswers[currentTestIndex] || "";
+                      const correct = userAns.toLowerCase().trim() === q.correctAnswer.toLowerCase().trim();
+                      setTestResults({
+                        ...testResults,
+                        [currentTestIndex]: {
+                          isCorrect: correct,
+                          mastery: correct ? 80 : 30,
+                          explanation: q.explanation || (correct ? "回答正确！" : `正确答案是：${q.correctAnswer}`),
+                        },
+                      });
+                    }}
+                    disabled={!testAnswers[currentTestIndex]}
+                  >
+                    提交答案
+                  </Button>
+                ) : (
+                  <Button
+                    className="flex-1"
+                    onClick={() => {
+                      if (currentTestIndex < testQuestions.length - 1) {
+                        setCurrentTestIndex(currentTestIndex + 1);
+                      } else {
+                        // 计算总分
+                        const total = Object.values(testResults).filter((r: any) => r.isCorrect).length;
+                        const score = Math.round((total / testQuestions.length) * 100);
+                        toast.success(`测试完成！得分: ${score}分`);
+                        setShowTest(false);
+                      }
+                    }}
+                  >
+                    {currentTestIndex < testQuestions.length - 1 ? "下一题" : "完成测试"}
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => setShowTest(false)}>
+                  关闭
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <CheckCircle className="h-10 w-10 text-green-400 mx-auto mb-3" />
+              <p>测试完成！</p>
+              <Button className="mt-3" onClick={() => setShowTest(false)}>关闭</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,1 +1,1 @@
-export const LOGIN_PATH = "/login";
+// 本地运行，无需登录

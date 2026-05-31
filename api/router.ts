@@ -6,6 +6,9 @@ import { skillRouter } from "./skill-router";
 import { studyRouter } from "./study-router";
 import { aiRouter } from "./ai-router";
 import { settingsRouter } from "./settings-router";
+import { planRouter } from "./plan-router";
+import { questionRouter } from "./question-router";
+import { todoRouter } from "./todo-router";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
@@ -16,6 +19,9 @@ export const appRouter = createRouter({
   study: studyRouter,
   ai: aiRouter,
   settings: settingsRouter,
+  plan: planRouter,
+  question: questionRouter,
+  todo: todoRouter,
 });
 
 export type AppRouter = typeof appRouter;

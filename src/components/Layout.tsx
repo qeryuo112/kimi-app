@@ -3,6 +3,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Toaster } from "@/components/ui/sonner";
 import {
   LayoutDashboard,
   BookOpen,
@@ -11,10 +12,11 @@ import {
   BrainCircuit,
   MessageSquareCode,
   Settings,
-  LogOut,
   User,
   Sparkles,
-  Loader2,
+  Target,
+  FileQuestion,
+  CheckSquare,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -26,9 +28,12 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: "/", label: "仪表盘", icon: LayoutDashboard },
+  { path: "/todos", label: "今日任务", icon: CheckSquare },
+  { path: "/plans", label: "学习计划", icon: Target },
   { path: "/subjects", label: "科目管理", icon: BookOpen },
   { path: "/knowledge", label: "知识树", icon: Network },
   { path: "/skills", label: "技能面板", icon: Zap },
+  { path: "/questions", label: "题库", icon: FileQuestion },
   { path: "/study", label: "学习记录", icon: BrainCircuit },
   { path: "/ai-assistant", label: "AI 助手", icon: MessageSquareCode },
   { path: "/settings", label: "设置", icon: Settings },
@@ -36,19 +41,7 @@ const navItems: NavItem[] = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <>{children}</>;
-  }
+  const { user } = useAuth();
 
   return (
     <div className="flex h-screen bg-background">
@@ -117,14 +110,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {user?.email || ""}
               </p>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-destructive"
-              onClick={logout}
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </Button>
           </div>
         </div>
       </aside>
@@ -135,6 +120,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+      <Toaster position="top-right" />
     </div>
   );
 }

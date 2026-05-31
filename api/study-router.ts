@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { studyLogs, studyStats, knowledgeNodes, subjects } from "@db/schema";
+import { studyLogs, studyStats, knowledgeNodes, subjects, userSettings } from "@db/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
+import { evaluateStudyLogQuality, generateStudyLogTests } from "./lib/ai";
 
 export const studyRouter = createRouter({
   // 列出用户的学习记录
@@ -153,6 +154,7 @@ export const studyRouter = createRouter({
         mood: z.enum(["great", "good", "normal", "tired", "bad"]).optional(),
         tags: z.string().optional(),
         aiFeedback: z.string().optional(),
+        aiTestScore: z.number().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -225,5 +227,80 @@ export const studyRouter = createRouter({
           avgDailyMinutes: Math.round(totalMinutes / days),
         },
       };
+    }),
+
+  // AI评估学习记录质量
+  aiEvaluate: authedQuery
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [log] = await db
+        .select()
+        .from(studyLogs)
+        .where(and(eq(studyLogs.id, input.id), eq(studyLogs.userId, ctx.user.id)));
+
+      if (!log) throw new Error("学习记录不存在");
+
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      const result = await evaluateStudyLogQuality(
+        log.title,
+        log.content || "",
+        log.duration,
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
+
+      // 更新学习记录的AI反馈和质量
+      await db
+        .update(studyLogs)
+        .set({
+          aiFeedback: result.feedback,
+          quality: result.quality,
+        })
+        .where(eq(studyLogs.id, input.id));
+
+      return result;
+    }),
+
+  // AI根据学习记录生成测试题
+  aiGenerateTests: authedQuery
+    .input(
+      z.object({
+        id: z.number(),
+        count: z.number().min(1).max(10).default(5),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [log] = await db
+        .select()
+        .from(studyLogs)
+        .where(and(eq(studyLogs.id, input.id), eq(studyLogs.userId, ctx.user.id)));
+
+      if (!log) throw new Error("学习记录不存在");
+      if (!log.content) throw new Error("学习记录没有内容，无法生成测试题");
+
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      const result = await generateStudyLogTests(
+        log.title,
+        log.content,
+        input.count,
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
+
+      return result;
     }),
 });

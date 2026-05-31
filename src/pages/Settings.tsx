@@ -43,6 +43,8 @@ export default function SettingsPage() {
     theme: "dark" as "light" | "dark" | "system",
     language: "zh-CN",
     aiModel: "kimi",
+    aiApiKey: "",
+    aiApiEndpoint: "",
     dailyGoal: 120,
     weekGoal: 600,
     notifications: true,
@@ -54,6 +56,8 @@ export default function SettingsPage() {
         theme: (settings.theme as "light" | "dark" | "system") || "dark",
         language: settings.language || "zh-CN",
         aiModel: settings.aiModel || "kimi",
+        aiApiKey: settings.aiApiKey || "",
+        aiApiEndpoint: settings.aiApiEndpoint || "",
         dailyGoal: settings.dailyGoal || 120,
         weekGoal: settings.weekGoal || 600,
         notifications: settings.notifications ?? true,
@@ -160,17 +164,16 @@ export default function SettingsPage() {
                 <div className="flex gap-3">
                   {[
                     { value: "kimi", label: "Kimi" },
-                    { value: "gpt-4", label: "GPT-4" },
                     { value: "custom", label: "自定义" },
                   ].map((model) => (
                     <button
                       key={model.value}
                       className={`px-4 py-2 rounded-lg border transition-all text-sm ${
-                        form.aiModel === model.value
+                        (model.value === "custom" ? form.aiModel !== "kimi" : form.aiModel === model.value)
                           ? "border-primary bg-primary/10 text-primary"
                           : "border-border hover:bg-secondary"
                       }`}
-                      onClick={() => setForm({ ...form, aiModel: model.value })}
+                      onClick={() => setForm({ ...form, aiModel: model.value === "custom" ? "gpt-4o" : "kimi" })}
                     >
                       {model.label}
                     </button>
@@ -178,15 +181,32 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {form.aiModel === "custom" && (
+              {form.aiModel !== "kimi" && (
                 <div className="space-y-3 p-3 rounded-lg bg-secondary/30 border border-border">
                   <div className="space-y-2">
+                    <label className="text-sm font-medium">模型名称</label>
+                    <Input
+                      placeholder="如 gpt-4o / deepseek-v4-pro"
+                      value={form.aiModel}
+                      onChange={(e) => setForm({ ...form, aiModel: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-sm font-medium">API 端点</label>
-                    <Input placeholder="https://api.example.com/v1" />
+                    <Input
+                      placeholder="https://api.openai.com/v1"
+                      value={form.aiApiEndpoint}
+                      onChange={(e) => setForm({ ...form, aiApiEndpoint: e.target.value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">API Key</label>
-                    <Input type="password" placeholder="sk-..." />
+                    <Input
+                      type="password"
+                      placeholder="sk-..."
+                      value={form.aiApiKey}
+                      onChange={(e) => setForm({ ...form, aiApiKey: e.target.value })}
+                    />
                   </div>
                 </div>
               )}

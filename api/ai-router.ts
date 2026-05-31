@@ -4,6 +4,7 @@ import { getDb } from "./queries/connection";
 import { aiConversations, aiAnalysisTasks, subjects, knowledgeNodes, skillDimensions, studyLogs } from "@db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { aiAssistantChat, generateStudyPlan } from "./lib/ai";
+import { userSettings } from "@db/schema";
 
 export const aiRouter = createRouter({
   // 获取对话历史
@@ -86,8 +87,20 @@ export const aiRouter = createRouter({
         .reverse()
         .map((m) => ({ role: m.role, content: m.content }));
 
+      // 读取用户AI配置
+      const [setting] = await getDb()
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
       // 调用AI
-      const response = await aiAssistantChat(messages, contextData);
+      const response = await aiAssistantChat(
+        messages,
+        contextData,
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
 
       // 保存AI回复
       await getDb().insert(aiConversations).values({
@@ -148,6 +161,12 @@ export const aiRouter = createRouter({
 
       if (nodes.length === 0) throw new Error("该科目还没有知识树，请先进行AI分析");
 
+      // 读取用户AI配置
+      const [setting] = await getDb()
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
       const result = await generateStudyPlan(
         subject.title,
         nodes.map((n) => ({
@@ -157,7 +176,10 @@ export const aiRouter = createRouter({
           difficulty: n.difficulty,
         })),
         input.dailyMinutes,
-        input.userLevel
+        input.userLevel,
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
       );
 
       // 创建分析任务记录

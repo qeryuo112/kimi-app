@@ -161,6 +161,7 @@ export const studyLogs = mysqlTable("study_logs", {
   tags: text("tags"), // JSON 标签
   attachments: text("attachments"), // 附件 JSON
   aiFeedback: text("aiFeedback"), // AI反馈
+  aiTestScore: int("aiTestScore"), // AI测试得分 0-100
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -243,3 +244,135 @@ export const studyStats = mysqlTable("study_stats", {
 
 export type StudyStat = typeof studyStats.$inferSelect;
 export type InsertStudyStat = typeof studyStats.$inferInsert;
+
+// ==================== 学习计划表 ====================
+export const plans = mysqlTable("plans", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(), // 计划名称，如"考研复习"
+  description: text("description"),
+  goal: text("goal"), // 目标描述
+  status: mysqlEnum("status", ["active", "paused", "completed"]).default("active").notNull(),
+  startDate: timestamp("startDate").defaultNow().notNull(),
+  endDate: timestamp("endDate"),
+  dailyMinutes: int("dailyMinutes").default(120).notNull(),
+  totalMonths: int("totalMonths").default(3).notNull(), // 计划总时长（月）
+  reviewRounds: int("reviewRounds").default(3).notNull(), // 复习轮数
+  aiPlan: text("aiPlan"), // AI生成的计划JSON
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt")
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+});
+
+export type Plan = typeof plans.$inferSelect;
+export type InsertPlan = typeof plans.$inferInsert;
+
+// ==================== 计划科目关联表 ====================
+export const planSubjects = mysqlTable("plan_subjects", {
+  id: serial("id").primaryKey(),
+  planId: bigint("planId", { mode: "number", unsigned: true }).notNull(),
+  subjectId: bigint("subjectId", { mode: "number", unsigned: true }).notNull(),
+  priority: int("priority").default(2).notNull(), // 优先级 1-5，由AI设定
+  orderIndex: int("orderIndex").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PlanSubject = typeof planSubjects.$inferSelect;
+export type InsertPlanSubject = typeof planSubjects.$inferInsert;
+
+// ==================== 题库表 ====================
+export const questions = mysqlTable("questions", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  subjectId: bigint("subjectId", { mode: "number", unsigned: true }),
+  nodeId: bigint("nodeId", { mode: "number", unsigned: true }), // 关联知识点
+  skillId: bigint("skillId", { mode: "number", unsigned: true }), // 关联技能
+  questionType: mysqlEnum("questionType", ["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).notNull(),
+  content: text("content").notNull(), // 题目内容
+  options: text("options"), // JSON 选项（选择题）
+  correctAnswer: text("correctAnswer").notNull(), // 正确答案
+  explanation: text("explanation"), // 解析
+  difficulty: int("difficulty").default(3).notNull(), // 难度 1-5
+  imageUrl: text("imageUrl"), // 题目图片URL
+  aiGenerated: boolean("aiGenerated").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Question = typeof questions.$inferSelect;
+export type InsertQuestion = typeof questions.$inferInsert;
+
+// ==================== 用户答题记录表 ====================
+export const userAnswers = mysqlTable("user_answers", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  questionId: bigint("questionId", { mode: "number", unsigned: true }).notNull(),
+  userAnswer: text("userAnswer").notNull(), // 用户答案
+  isCorrect: boolean("isCorrect").notNull(),
+  score: int("score").default(0).notNull(), // 得分 0-100
+  timeSpent: int("timeSpent"), // 答题用时(秒)
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type UserAnswer = typeof userAnswers.$inferSelect;
+export type InsertUserAnswer = typeof userAnswers.$inferInsert;
+
+// ==================== 错题本表 ====================
+export const wrongAnswers = mysqlTable("wrong_answers", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  questionId: bigint("questionId", { mode: "number", unsigned: true }).notNull(),
+  userAnswer: text("userAnswer").notNull(),
+  wrongCount: int("wrongCount").default(1).notNull(), // 错误次数
+  lastWrongAt: timestamp("lastWrongAt").defaultNow().notNull(),
+  mastered: boolean("mastered").default(false).notNull(), // 是否已掌握
+  reviewCount: int("reviewCount").default(0).notNull(), // 复习次数
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type WrongAnswer = typeof wrongAnswers.$inferSelect;
+export type InsertWrongAnswer = typeof wrongAnswers.$inferInsert;
+
+// ==================== 每日任务表 ====================
+export const dailyTodos = mysqlTable("daily_todos", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  planId: bigint("planId", { mode: "number", unsigned: true }).notNull(),
+  date: varchar("date", { length: 20 }).notNull(), // YYYY-MM-DD
+  dayIndex: int("dayIndex").notNull(), // 对应 dailyPlan 中的 day
+  subject: varchar("subject", { length: 255 }).notNull(),
+  knowledgeNodes: text("knowledgeNodes"), // JSON 知识点数组
+  estimatedMinutes: int("estimatedMinutes").default(120).notNull(),
+  focus: text("focus"),
+  status: mysqlEnum("status", ["pending", "completed", "skipped"]).default("pending").notNull(),
+  completedAt: timestamp("completedAt"),
+  actualMinutes: int("actualMinutes"), // 实际学习时长
+  aiEvaluation: text("aiEvaluation"), // AI评估反馈
+  aiMastery: int("aiMastery").default(0), // AI评估掌握度 0-100
+  snapshot: text("snapshot"), // JSON：删除时需要恢复的状态快照
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type DailyTodo = typeof dailyTodos.$inferSelect;
+export type InsertDailyTodo = typeof dailyTodos.$inferInsert;
+
+// ==================== 复习调度表（间隔重复） ====================
+export const reviewSchedules = mysqlTable("review_schedules", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  planId: bigint("planId", { mode: "number", unsigned: true }).notNull(),
+  nodeTitle: varchar("nodeTitle", { length: 255 }).notNull(), // 知识点标题
+  subjectTitle: varchar("subjectTitle", { length: 255 }).notNull(),
+  originalStudyDate: varchar("originalStudyDate", { length: 20 }).notNull(), // 首次学习日期
+  reviewDates: text("reviewDates"), // JSON 复习日期数组 [YYYY-MM-DD, ...]
+  nextReviewDate: varchar("nextReviewDate", { length: 20 }), // 下次复习日期
+  intervalDays: int("intervalDays").default(1).notNull(), // 当前间隔天数
+  reviewCount: int("reviewCount").default(0).notNull(), // 已复习次数
+  mastery: int("mastery").default(0).notNull(), // 掌握度 0-100
+  status: mysqlEnum("status", ["active", "mastered", "dropped"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ReviewSchedule = typeof reviewSchedules.$inferSelect;
+export type InsertReviewSchedule = typeof reviewSchedules.$inferInsert;

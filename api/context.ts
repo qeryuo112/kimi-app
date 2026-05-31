@@ -1,6 +1,5 @@
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import type { User } from "@db/schema";
-import { authenticateRequest } from "./kimi/auth";
 
 export type TrpcContext = {
   req: Request;
@@ -8,14 +7,20 @@ export type TrpcContext = {
   user?: User;
 };
 
+const LOCAL_USER: User = {
+  id: 1,
+  unionId: "local-user",
+  name: "本地用户",
+  email: "local@example.com",
+  avatar: null,
+  role: "admin",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  lastSignInAt: new Date(),
+};
+
 export async function createContext(
   opts: FetchCreateContextFnOptions,
 ): Promise<TrpcContext> {
-  const ctx: TrpcContext = { req: opts.req, resHeaders: opts.resHeaders };
-  try {
-    ctx.user = await authenticateRequest(opts.req.headers);
-  } catch {
-    // Authentication is optional here
-  }
-  return ctx;
+  return { req: opts.req, resHeaders: opts.resHeaders, user: LOCAL_USER };
 }

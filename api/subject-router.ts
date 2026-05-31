@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { subjects, knowledgeNodes, knowledgeEdges, skillDimensions } from "@db/schema";
+import { subjects, knowledgeNodes, knowledgeEdges, skillDimensions, userSettings } from "@db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import {
   analyzeContentForKnowledgeTree,
@@ -38,8 +38,6 @@ export const subjectRouter = createRouter({
         category: z.string().optional(),
         sourceType: z.enum(["book", "course", "article", "manual", "other"]).default("other"),
         sourceContent: z.string().optional(),
-        difficulty: z.number().min(1).max(5).default(3),
-        priority: z.number().min(1).max(5).default(2),
         color: z.string().default("#3b82f6"),
         icon: z.string().optional(),
       })
@@ -116,7 +114,7 @@ export const subjectRouter = createRouter({
       return { success: true };
     }),
 
-  // AI分析科目内容，生成知识树和技能维度
+  // AI分析科目内容，生成知识树和技能维度（AI自动判定难度/优先级）
   analyze: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
@@ -139,16 +137,28 @@ export const subjectRouter = createRouter({
         .where(eq(subjects.id, input.id));
 
       try {
-        // 1. AI分析生成知识树
+        // 读取用户AI配置
+        const [setting] = await db
+          .select()
+          .from(userSettings)
+          .where(eq(userSettings.userId, ctx.user.id));
+
+        // 1. AI分析生成知识树（同时返回科目难度和优先级）
         const knowledgeResult = await analyzeContentForKnowledgeTree(
           subject.sourceContent,
-          subject.title
+          subject.title,
+          setting?.aiApiKey || undefined,
+          setting?.aiApiEndpoint || undefined,
+          setting?.aiModel || undefined
         );
 
         // 2. AI分析生成技能维度
         const skillsResult = await analyzeContentForSkills(
           subject.sourceContent,
-          subject.title
+          subject.title,
+          setting?.aiApiKey || undefined,
+          setting?.aiApiEndpoint || undefined,
+          setting?.aiModel || undefined
         );
 
         // 3. 保存知识节点到数据库
@@ -232,16 +242,22 @@ export const subjectRouter = createRouter({
           }
         }
 
-        // 8. 更新科目状态为已分析
+        // 8. 更新科目状态为已分析，同时用AI判定的难度和优先级更新科目
         await db
           .update(subjects)
-          .set({ status: "analyzed" })
+          .set({
+            status: "analyzed",
+            difficulty: knowledgeResult.subjectDifficulty,
+            priority: knowledgeResult.subjectPriority,
+          })
           .where(eq(subjects.id, input.id));
 
         return {
           success: true,
           nodesCount: knowledgeResult.nodes.length,
           skillsCount: skillsResult.skills.length,
+          difficulty: knowledgeResult.subjectDifficulty,
+          priority: knowledgeResult.subjectPriority,
         };
       } catch (error) {
         // 更新状态为错误
