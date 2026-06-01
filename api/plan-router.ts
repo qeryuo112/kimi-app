@@ -34,9 +34,11 @@ import {
   questions,
   userAnswers,
   wrongAnswers,
+  weeklyReviews,
+  examPapers,
 } from "@db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills, generateCompleteStudyPlanFromFile, generateRoundAndMonthlyPlanFromFile, generateWeeklyPlanFromFile, generateDailyPlanFromFile, generateWeeklyDailyPlanFromFile } from "./lib/ai";
+import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills, generateCompleteStudyPlanFromFile, generateRoundAndMonthlyPlanFromFile, generateWeeklyPlanFromFile, generateDailyPlanFromFile, generateWeeklyDailyPlanFromFile, generateWeeklyReviewQuestions, evaluateWeeklyReview } from "./lib/ai";
 
 export const planRouter = createRouter({
   // 列出用户的所有计划
@@ -1045,5 +1047,525 @@ export const planRouter = createRouter({
       });
 
       return { success: true, weekNumber: input.weekNumber, daysCount: weekDaysResult.days.length };
+    }),
+
+  // 生成周回顾测试
+  aiGenerateWeeklyReview: authedQuery
+    .input(z.object({
+      planId: z.number(),
+      weekNumber: z.number(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      planDebugLog("aiGenerateWeeklyReview 开始", { planId: input.planId, weekNumber: input.weekNumber });
+
+      const db = getDb();
+      const [plan] = await db
+        .select()
+        .from(plans)
+        .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
+
+      if (!plan) throw new Error("计划不存在");
+
+      const aiPlan = plan.aiPlan ? JSON.parse(plan.aiPlan) : null;
+      if (!aiPlan || !aiPlan.weeklyPlan) {
+        throw new Error("请先生成整体计划");
+      }
+
+      const weekData = aiPlan.weeklyPlan.find((w: any) => w.week === input.weekNumber);
+      if (!weekData) {
+        throw new Error(`第${input.weekNumber}周不存在`);
+      }
+
+      // 检查是否已生成
+      const [existingReview] = await db
+        .select()
+        .from(weeklyReviews)
+        .where(
+          and(
+            eq(weeklyReviews.planId, input.planId),
+            eq(weeklyReviews.weekNumber, input.weekNumber),
+            eq(weeklyReviews.userId, ctx.user.id)
+          )
+        );
+
+      if (existingReview && existingReview.status !== "pending") {
+        throw new Error("该周的回顾测试已生成");
+      }
+
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      // 获取科目数据
+      const ps = await db
+        .select()
+        .from(planSubjects)
+        .where(eq(planSubjects.planId, plan.id));
+      const subjectIds = ps.map((p) => p.subjectId);
+
+      const planSubs = await db
+        .select()
+        .from(subjects)
+        .where(and(eq(subjects.userId, ctx.user.id)))
+        .then((rows) => rows.filter((s) => subjectIds.includes(s.id)));
+
+      const subjectsData = planSubs.map((s) => ({
+        title: s.title,
+        priority: s.priority,
+        difficulty: s.difficulty,
+      }));
+
+      const weekKnowledgeNodes = weekData.knowledgeNodes || [];
+
+      // 从题库试卷中匹配包含本周知识点的试卷
+      const userPapers = await db
+        .select()
+        .from(examPapers)
+        .where(eq(examPapers.userId, ctx.user.id));
+
+      let matchedPaper = userPapers.find((p) => {
+        try {
+          const paperNodes = JSON.parse(p.knowledgeNodeIds || "[]");
+          return paperNodes.some((node: string | number) => {
+            if (typeof node === "string") {
+              return weekKnowledgeNodes.some((wn: string) =>
+                wn.toLowerCase().includes(node.toLowerCase()) ||
+                node.toLowerCase().includes(wn.toLowerCase())
+              );
+            }
+            return false;
+          });
+        } catch {
+          return false;
+        }
+      });
+
+      let savedQuestionIds: number[] = [];
+      let knowledgeSummary = "本周知识点回顾测试";
+
+      if (matchedPaper) {
+        // 使用匹配到的试卷题目
+        try {
+          savedQuestionIds = JSON.parse(matchedPaper.questionIds || "[]");
+          knowledgeSummary = `基于试卷「${matchedPaper.title}」的回顾测试`;
+        } catch {
+          savedQuestionIds = [];
+        }
+        planDebugLog("aiGenerateWeeklyReview 匹配到试卷", {
+          paperTitle: matchedPaper.title,
+          paperId: matchedPaper.id,
+          questionCount: savedQuestionIds.length,
+        });
+      } else {
+        // 未匹配到试卷，从所有题目中按知识点匹配
+        const userQuestions = await db
+          .select()
+          .from(questions)
+          .where(eq(questions.userId, ctx.user.id));
+
+        const matchedQuestions = userQuestions.filter((q) => {
+          const detectedKP = q.detectedKnowledgePoint || "";
+          if (detectedKP && weekKnowledgeNodes.some((node: string) =>
+            detectedKP.toLowerCase().includes(node.toLowerCase()) ||
+            node.toLowerCase().includes(detectedKP.toLowerCase())
+          )) {
+            return true;
+          }
+          const content = q.content || "";
+          if (weekKnowledgeNodes.some((node: string) =>
+            content.toLowerCase().includes(node.toLowerCase())
+          )) {
+            return true;
+          }
+          return false;
+        });
+
+        savedQuestionIds = matchedQuestions.map((q) => q.id);
+        planDebugLog("aiGenerateWeeklyReview 从题库匹配题目", {
+          totalQuestions: userQuestions.length,
+          matchedQuestions: matchedQuestions.length,
+        });
+      }
+
+      // 如果题目不足10道，用AI生成补充
+      if (savedQuestionIds.length < 10) {
+        const fileServerUrl = setting?.fileServerUrl?.trim();
+        if (fileServerUrl) {
+          const fileData = {
+            subjects: subjectsData,
+            week: weekData,
+            config: { weekNumber: input.weekNumber }
+          };
+
+          const tempDir = path.join(process.cwd(), "temp");
+          if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+          const tempFileName = `weekly-review-${ctx.user.id}-${plan.id}-${input.weekNumber}-${Date.now()}.txt`;
+          const tempFilePath = path.join(tempDir, tempFileName);
+          fs.writeFileSync(tempFilePath, JSON.stringify(fileData, null, 2));
+
+          const uploadFormData = new FormData();
+          const fileBuffer = fs.readFileSync(tempFilePath);
+          const blob = new Blob([fileBuffer], { type: "application/json" });
+          uploadFormData.append("file", blob, tempFileName);
+
+          const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
+          const uploadRes = await fetch(uploadUrl, {
+            method: "POST",
+            body: uploadFormData,
+          });
+
+          try { fs.unlinkSync(tempFilePath); } catch {}
+
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            const fileUrl = uploadData.url;
+
+            if (fileUrl) {
+              try {
+                const reviewResult = await generateWeeklyReviewQuestions(
+                  fileUrl,
+                  {
+                    weekNumber: input.weekNumber,
+                    knowledgeNodes: weekKnowledgeNodes,
+                    subjects: weekData.subjects || [],
+                  },
+                  10 - savedQuestionIds.length,
+                  setting?.aiApiKey || undefined,
+                  setting?.aiApiEndpoint || undefined,
+                  setting?.aiModel || undefined
+                );
+
+                knowledgeSummary = reviewResult.knowledgeSummary || knowledgeSummary;
+
+                for (const q of reviewResult.questions) {
+                  const [inserted] = await db.insert(questions).values({
+                    userId: ctx.user.id,
+                    content: q.content,
+                    options: q.options ? JSON.stringify(q.options) : null,
+                    correctAnswer: q.correctAnswer,
+                    explanation: q.explanation,
+                    difficulty: q.difficulty,
+                    questionType: q.options ? "single_choice" : "short_answer",
+                    detectedSubject: q.subject,
+                    detectedKnowledgePoint: q.knowledgeNode,
+                    aiGenerated: true,
+                  });
+                  if (inserted && inserted.insertId) {
+                    savedQuestionIds.push(inserted.insertId);
+                  }
+                }
+              } catch (err) {
+                planDebugLog("aiGenerateWeeklyReview AI补充题目失败", { error: String(err) });
+              }
+            }
+          }
+        }
+      }
+
+      // 创建或更新周回顾记录
+      if (existingReview) {
+        await db
+          .update(weeklyReviews)
+          .set({
+            questionIds: JSON.stringify(savedQuestionIds),
+            knowledgeSummary: reviewResult.knowledgeSummary,
+            totalQuestions: savedQuestionIds.length,
+            status: "generated",
+          })
+          .where(eq(weeklyReviews.id, existingReview.id));
+      } else {
+        const startDate = plan.startDate
+          ? new Date(plan.startDate)
+          : new Date();
+        const weekStart = new Date(startDate);
+        weekStart.setDate(weekStart.getDate() + (input.weekNumber - 1) * 7);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+
+        await db.insert(weeklyReviews).values({
+          userId: ctx.user.id,
+          planId: input.planId,
+          weekNumber: input.weekNumber,
+          weekStartDate: weekStart.toISOString().split("T")[0],
+          weekEndDate: weekEnd.toISOString().split("T")[0],
+          questionIds: JSON.stringify(savedQuestionIds),
+          knowledgeSummary: reviewResult.knowledgeSummary,
+          totalQuestions: savedQuestionIds.length,
+          status: "generated",
+        });
+      }
+
+      planDebugLog("aiGenerateWeeklyReview 完成", {
+        weekNumber: input.weekNumber,
+        questionsCount: savedQuestionIds.length,
+      });
+
+      return { success: true, weekNumber: input.weekNumber, questionsCount: savedQuestionIds.length };
+    }),
+
+  // 获取周回顾测试详情
+  getWeeklyReview: authedQuery
+    .input(z.object({
+      planId: z.number(),
+      weekNumber: z.number(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [review] = await db
+        .select()
+        .from(weeklyReviews)
+        .where(
+          and(
+            eq(weeklyReviews.planId, input.planId),
+            eq(weeklyReviews.weekNumber, input.weekNumber),
+            eq(weeklyReviews.userId, ctx.user.id)
+          )
+        );
+
+      if (!review) return null;
+
+      // 获取题目详情
+      const questionIds = (() => {
+        try {
+          return JSON.parse(review.questionIds || "[]");
+        } catch {
+          return [];
+        }
+      })();
+
+      let qs: any[] = [];
+      if (questionIds.length > 0) {
+        const allQuestions = await db
+          .select()
+          .from(questions)
+          .where(eq(questions.userId, ctx.user.id));
+        qs = allQuestions.filter((q) => questionIds.includes(q.id));
+      }
+
+      return {
+        ...review,
+        questions: qs,
+      };
+    }),
+
+  // 提交周回顾测试答案
+  submitWeeklyReview: authedQuery
+    .input(z.object({
+      planId: z.number(),
+      weekNumber: z.number(),
+      answers: z.array(z.object({
+        questionId: z.number(),
+        userAnswer: z.string(),
+      })),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      planDebugLog("submitWeeklyReview 开始", { planId: input.planId, weekNumber: input.weekNumber });
+
+      const db = getDb();
+      const [plan] = await db
+        .select()
+        .from(plans)
+        .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
+
+      if (!plan) throw new Error("计划不存在");
+
+      const [review] = await db
+        .select()
+        .from(weeklyReviews)
+        .where(
+          and(
+            eq(weeklyReviews.planId, input.planId),
+            eq(weeklyReviews.weekNumber, input.weekNumber),
+            eq(weeklyReviews.userId, ctx.user.id)
+          )
+        );
+
+      if (!review) throw new Error("回顾测试不存在");
+      if (review.status === "completed") throw new Error("回顾测试已完成");
+
+      // 获取题目详情
+      const questionIds = (() => {
+        try {
+          return JSON.parse(review.questionIds || "[]");
+        } catch {
+          return [];
+        }
+      })();
+
+      const qs = await db
+        .select()
+        .from(questions)
+        .where(eq(questions.userId, ctx.user.id));
+
+      const reviewQuestions = qs.filter((q) => questionIds.includes(q.id));
+
+      // 批改答案
+      const answerResults = input.answers.map((a) => {
+        const q = reviewQuestions.find((q) => q.id === a.questionId);
+        if (!q) return null;
+        const isCorrect = a.userAnswer.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase();
+        return {
+          questionId: a.questionId,
+          userAnswer: a.userAnswer,
+          correctAnswer: q.correctAnswer,
+          isCorrect,
+          knowledgeNode: q.detectedKnowledgePoint || "",
+        };
+      }).filter(Boolean);
+
+      const correctCount = answerResults.filter((a: any) => a.isCorrect).length;
+      const totalScore = Math.round((correctCount / reviewQuestions.length) * 100);
+
+      // 保存答题记录
+      for (const a of input.answers) {
+        const q = reviewQuestions.find((q) => q.id === a.questionId);
+        if (!q) continue;
+        const isCorrect = a.userAnswer.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase();
+
+        await db.insert(userAnswers).values({
+          userId: ctx.user.id,
+          questionId: a.questionId,
+          userAnswer: a.userAnswer,
+          isCorrect,
+          score: isCorrect ? 100 : 0,
+        });
+
+        // 保存错题
+        if (!isCorrect) {
+          await db.insert(wrongAnswers).values({
+            userId: ctx.user.id,
+            questionId: a.questionId,
+            userAnswer: a.userAnswer,
+          });
+        }
+      }
+
+      // 获取AI评估
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      const aiPlan = plan.aiPlan ? JSON.parse(plan.aiPlan) : null;
+      const weekData = aiPlan?.weeklyPlan?.find((w: any) => w.week === input.weekNumber);
+
+      let evaluation = {
+        totalScore,
+        correctCount,
+        masteryLevel: totalScore,
+        weakPoints: [] as string[],
+        strongPoints: [] as string[],
+        aiFeedback: `本周测试正确率${totalScore}%，答对${correctCount}/${reviewQuestions.length}题。`,
+      };
+
+      // 如果有文件服务器，调用AI评估
+      if (setting?.fileServerUrl && weekData) {
+        try {
+          const fileData = {
+            week: weekData,
+            answers: answerResults,
+          };
+
+          const tempDir = path.join(process.cwd(), "temp");
+          const tempFileName = `weekly-eval-${ctx.user.id}-${plan.id}-${input.weekNumber}-${Date.now()}.txt`;
+          const tempFilePath = path.join(tempDir, tempFileName);
+          fs.writeFileSync(tempFilePath, JSON.stringify(fileData, null, 2));
+
+          const uploadFormData = new FormData();
+          const fileBuffer = fs.readFileSync(tempFilePath);
+          const blob = new Blob([fileBuffer], { type: "application/json" });
+          uploadFormData.append("file", blob, tempFileName);
+
+          const uploadUrl = `${setting.fileServerUrl.replace(/\/$/, "")}/upload`;
+          const uploadRes = await fetch(uploadUrl, {
+            method: "POST",
+            body: uploadFormData,
+          });
+
+          try { fs.unlinkSync(tempFilePath); } catch {}
+
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            const fileUrl = uploadData.url;
+
+            const aiEval = await evaluateWeeklyReview(
+              fileUrl,
+              {
+                weekNumber: input.weekNumber,
+                knowledgeNodes: weekData.knowledgeNodes || [],
+              },
+              answerResults as any,
+              setting?.aiApiKey || undefined,
+              setting?.aiApiEndpoint || undefined,
+              setting?.aiModel || undefined
+            );
+
+            evaluation = { ...evaluation, ...aiEval };
+          }
+        } catch (err) {
+          planDebugLog("submitWeeklyReview AI评估失败", { error: String(err) });
+        }
+      }
+
+      // 更新回顾记录
+      await db
+        .update(weeklyReviews)
+        .set({
+          testScore: totalScore,
+          correctCount,
+          masteryLevel: evaluation.masteryLevel,
+          weakPoints: JSON.stringify(evaluation.weakPoints),
+          strongPoints: JSON.stringify(evaluation.strongPoints),
+          aiFeedback: evaluation.aiFeedback,
+          answers: JSON.stringify(input.answers),
+          status: "completed",
+          completedAt: new Date(),
+        })
+        .where(eq(weeklyReviews.id, review.id));
+
+      // 更新复习调度中的掌握度
+      const weakNodes = evaluation.weakPoints || [];
+      for (const nodeTitle of weakNodes) {
+        const [schedule] = await db
+          .select()
+          .from(reviewSchedules)
+          .where(
+            and(
+              eq(reviewSchedules.userId, ctx.user.id),
+              eq(reviewSchedules.planId, input.planId),
+              eq(reviewSchedules.nodeTitle, nodeTitle)
+            )
+          );
+
+        if (schedule) {
+          await db
+            .update(reviewSchedules)
+            .set({
+              mastery: Math.max(0, schedule.mastery - 20),
+              status: "active",
+            })
+            .where(eq(reviewSchedules.id, schedule.id));
+        }
+      }
+
+      planDebugLog("submitWeeklyReview 完成", {
+        weekNumber: input.weekNumber,
+        score: totalScore,
+        mastery: evaluation.masteryLevel,
+      });
+
+      return {
+        success: true,
+        weekNumber: input.weekNumber,
+        score: totalScore,
+        correctCount,
+        totalQuestions: reviewQuestions.length,
+        masteryLevel: evaluation.masteryLevel,
+        weakPoints: evaluation.weakPoints,
+        strongPoints: evaluation.strongPoints,
+        aiFeedback: evaluation.aiFeedback,
+      };
     }),
 });

@@ -138,6 +138,44 @@ export default function Plans() {
     },
   });
 
+  // 周回顾测试
+  const [reviewWeek, setReviewWeek] = useState<number | null>(null);
+  const [showReviewDialog, setShowReviewDialog] = useState(false);
+  const [reviewAnswers, setReviewAnswers] = useState<Record<number, string>>({});
+  const [reviewStep, setReviewStep] = useState<"intro" | "test" | "result">("intro");
+  const [reviewResult, setReviewResult] = useState<any>(null);
+
+  const aiGenerateWeeklyReview = trpc.plan.aiGenerateWeeklyReview.useMutation({
+    onSuccess: (data) => {
+      if (expandedPlan !== null) {
+        utils.plan.getById.invalidate({ id: expandedPlan });
+      }
+      toast.success(`第${data.weekNumber}周回顾测试生成成功！共 ${data.questionsCount} 题`);
+      setReviewWeek(null);
+    },
+    onError: (err) => {
+      toast.error(`生成失败: ${err.message}`);
+      setReviewWeek(null);
+    },
+  });
+
+  const { data: weeklyReviewData, refetch: refetchWeeklyReview } = trpc.plan.getWeeklyReview.useQuery(
+    { planId: expandedPlan!, weekNumber: reviewWeek! },
+    { enabled: expandedPlan !== null && reviewWeek !== null }
+  );
+
+  const submitWeeklyReview = trpc.plan.submitWeeklyReview.useMutation({
+    onSuccess: (data) => {
+      if (expandedPlan !== null) {
+        utils.plan.getById.invalidate({ id: expandedPlan });
+      }
+      setReviewResult(data);
+      setReviewStep("result");
+      toast.success(`测试完成！得分：${data.score}分`);
+    },
+    onError: (err) => toast.error(`提交失败: ${err.message}`),
+  });
+
   const generateTodos = trpc.todo.generateTodayTodos.useMutation({
     onSuccess: (data) => {
       utils.todo.getToday.invalidate();
@@ -218,6 +256,7 @@ export default function Plans() {
   };
 
   return (
+    <>
     <div className="p-6 max-w-6xl mx-auto">
       {/* 头部 */}
       <div className="flex items-center justify-between mb-6">
@@ -807,7 +846,7 @@ export default function Plans() {
                                               ))}
                                             </div>
                                           )}
-                                          <div className="mt-2 pt-2 border-t border-border/50">
+                                          <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
                                             {isGenerating ? (
                                               <Button variant="ghost" size="sm" disabled className="w-full h-7 text-xs">
                                                 <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -835,6 +874,22 @@ export default function Plans() {
                                                 生成日计划
                                               </Button>
                                             )}
+                                            {/* 周回顾测试按钮 */}
+                                            <Button
+                                              variant="secondary"
+                                              size="sm"
+                                              className="w-full h-7 text-xs"
+                                              onClick={() => {
+                                                setReviewWeek(weekNum);
+                                                setReviewStep("intro");
+                                                setReviewAnswers({});
+                                                setReviewResult(null);
+                                                setShowReviewDialog(true);
+                                              }}
+                                            >
+                                              <Target className="h-3 w-3 mr-1" />
+                                              周回顾测试
+                                            </Button>
                                           </div>
                                         </div>
                                       );
@@ -949,5 +1004,201 @@ export default function Plans() {
         </div>
       )}
     </div>
+
+    {/* 周回顾测试弹窗 */}
+    <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>第{reviewWeek}周 · 回顾测试</DialogTitle>
+          </DialogHeader>
+
+          {reviewStep === "intro" && weeklyReviewData && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg bg-secondary/20">
+                <h4 className="font-medium mb-2">本周知识点总结</h4>
+                <p className="text-sm text-muted-foreground">{weeklyReviewData.knowledgeSummary || "暂无总结"}</p>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>题目数量：{weeklyReviewData.totalQuestions}题</span>
+                <span>状态：{weeklyReviewData.status === "completed" ? "已完成" : "未开始"}</span>
+              </div>
+              {weeklyReviewData.status === "completed" ? (
+                <div className="space-y-3">
+                  <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">测试得分</span>
+                      <span className="text-2xl font-bold text-green-600">{weeklyReviewData.testScore}分</span>
+                    </div>
+                    <p className="text-sm mt-2">答对 {weeklyReviewData.correctCount}/{weeklyReviewData.totalQuestions} 题</p>
+                  </div>
+                  {weeklyReviewData.aiFeedback && (
+                    <div className="p-3 rounded-lg bg-blue-500/10">
+                      <p className="text-sm">{weeklyReviewData.aiFeedback}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Button
+                  className="w-full"
+                  onClick={() => setReviewStep("test")}
+                  disabled={!weeklyReviewData.questions || weeklyReviewData.questions.length === 0}
+                >
+                  开始测试
+                </Button>
+              )}
+            </div>
+          )}
+
+          {reviewStep === "intro" && !weeklyReviewData && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">回顾测试尚未生成，请先生成测试题目。</p>
+              <Button
+                className="w-full"
+                onClick={() => {
+                  if (reviewWeek) {
+                    aiGenerateWeeklyReview.mutate({
+                      planId: expandedPlan!,
+                      weekNumber: reviewWeek,
+                    });
+                  }
+                }}
+                disabled={aiGenerateWeeklyReview.isPending}
+              >
+                {aiGenerateWeeklyReview.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    生成回顾测试
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {reviewStep === "test" && weeklyReviewData?.questions && (
+            <div className="space-y-4">
+              {weeklyReviewData.questions.map((q: any, idx: number) => (
+                <div key={q.id} className="p-4 rounded-lg border border-border">
+                  <div className="flex items-start gap-2">
+                    <span className="text-sm font-medium text-primary min-w-[24px]">{idx + 1}.</span>
+                    <div className="flex-1 space-y-2">
+                      <p className="text-sm">{q.content}</p>
+                      {q.options && (() => {
+                        try {
+                          const opts = JSON.parse(q.options);
+                          return (
+                            <div className="space-y-1">
+                              {opts.map((opt: any) => (
+                                <label key={opt.label} className="flex items-center gap-2 p-2 rounded hover:bg-secondary/50 cursor-pointer">
+                                  <input
+                                    type="radio"
+                                    name={`question-${q.id}`}
+                                    value={opt.label}
+                                    checked={reviewAnswers[q.id] === opt.label}
+                                    onChange={(e) => setReviewAnswers({ ...reviewAnswers, [q.id]: e.target.value })}
+                                    className="accent-primary"
+                                  />
+                                  <span className="text-sm">{opt.label}. {opt.text}</span>
+                                </label>
+                              ))}
+                            </div>
+                          );
+                        } catch {
+                          return null;
+                        }
+                      })()}
+                      {!q.options && (
+                        <Input
+                          placeholder="请输入答案"
+                          value={reviewAnswers[q.id] || ""}
+                          onChange={(e) => setReviewAnswers({ ...reviewAnswers, [q.id]: e.target.value })}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <Button
+                className="w-full"
+                onClick={() => {
+                  const answers = Object.entries(reviewAnswers).map(([questionId, userAnswer]) => ({
+                    questionId: parseInt(questionId),
+                    userAnswer,
+                  }));
+                  if (reviewWeek) {
+                    submitWeeklyReview.mutate({
+                      planId: expandedPlan!,
+                      weekNumber: reviewWeek,
+                      answers,
+                    });
+                  }
+                }}
+                disabled={submitWeeklyReview.isPending || Object.keys(reviewAnswers).length < weeklyReviewData.questions.length}
+              >
+                {submitWeeklyReview.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    提交中...
+                  </>
+                ) : (
+                  "提交答案"
+                )}
+              </Button>
+            </div>
+          )}
+
+          {reviewStep === "result" && reviewResult && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30 text-center">
+                <div className="text-3xl font-bold text-green-600">{reviewResult.score}分</div>
+                <p className="text-sm mt-1">答对 {reviewResult.correctCount}/{reviewResult.totalQuestions} 题</p>
+                <div className="mt-2">
+                  <Badge variant={reviewResult.masteryLevel >= 80 ? "default" : reviewResult.masteryLevel >= 60 ? "secondary" : "destructive"}>
+                    掌握度 {reviewResult.masteryLevel}%
+                  </Badge>
+                </div>
+              </div>
+
+              {reviewResult.aiFeedback && (
+                <div className="p-3 rounded-lg bg-blue-500/10">
+                  <h4 className="font-medium text-sm mb-1">AI评估</h4>
+                  <p className="text-sm">{reviewResult.aiFeedback}</p>
+                </div>
+              )}
+
+              {reviewResult.weakPoints && reviewResult.weakPoints.length > 0 && (
+                <div className="p-3 rounded-lg bg-red-500/10">
+                  <h4 className="font-medium text-sm mb-1 text-red-600">薄弱知识点</h4>
+                  <div className="flex flex-wrap gap-1">
+                    {reviewResult.weakPoints.map((wp: string, i: number) => (
+                      <Badge key={i} variant="outline" className="text-xs">{wp}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {reviewResult.strongPoints && reviewResult.strongPoints.length > 0 && (
+                <div className="p-3 rounded-lg bg-green-500/10">
+                  <h4 className="font-medium text-sm mb-1 text-green-600">掌握良好</h4>
+                  <div className="flex flex-wrap gap-1">
+                    {reviewResult.strongPoints.map((sp: string, i: number) => (
+                      <Badge key={i} variant="outline" className="text-xs">{sp}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <Button className="w-full" onClick={() => setShowReviewDialog(false)}>
+                关闭
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+    </Dialog>
+    </>
   );
 }

@@ -401,3 +401,29 @@ export const reviewSchedules = mysqlTable("review_schedules", {
 
 export type ReviewSchedule = typeof reviewSchedules.$inferSelect;
 export type InsertReviewSchedule = typeof reviewSchedules.$inferInsert;
+
+// ==================== 周回顾测试表 ====================
+export const weeklyReviews = mysqlTable("weekly_reviews", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  planId: bigint("planId", { mode: "number", unsigned: true }).notNull(),
+  weekNumber: int("weekNumber").notNull(), // 第几周
+  weekStartDate: varchar("weekStartDate", { length: 20 }).notNull(), // 本周开始日期 YYYY-MM-DD
+  weekEndDate: varchar("weekEndDate", { length: 20 }).notNull(), // 本周结束日期 YYYY-MM-DD
+  knowledgeSummary: text("knowledgeSummary"), // AI总结本周知识点
+  questionIds: text("questionIds"), // JSON 题目ID数组
+  testScore: int("testScore"), // 测试得分
+  totalQuestions: int("totalQuestions").default(0).notNull(),
+  correctCount: int("correctCount").default(0), // 答对题数
+  masteryLevel: int("masteryLevel").default(0), // 整体掌握度 0-100
+  weakPoints: text("weakPoints"), // JSON 薄弱知识点列表
+  strongPoints: text("strongPoints"), // JSON 掌握良好知识点列表
+  aiFeedback: text("aiFeedback"), // AI评语和建议
+  answers: text("answers"), // JSON 用户答案记录
+  status: mysqlEnum("status", ["pending", "completed", "generated"]).default("pending").notNull(),
+  completedAt: timestamp("completedAt"), // 完成时间
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type WeeklyReview = typeof weeklyReviews.$inferSelect;
+export type InsertWeeklyReview = typeof weeklyReviews.$inferInsert;

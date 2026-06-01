@@ -2537,3 +2537,202 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
     throw new Error("AI返回的日计划数据格式不正确");
   }
 }
+
+// 生成周回顾测试题目
+export async function generateWeeklyReviewQuestions(
+  fileUrl: string,
+  weekData: {
+    weekNumber: number;
+    knowledgeNodes: string[];
+    subjects: string[];
+  },
+  questionCount: number,
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  questions: Array<{
+    content: string;
+    options?: Array<{ label: string; text: string }>;
+    correctAnswer: string;
+    explanation: string;
+    difficulty: number;
+    knowledgeNode: string;
+    subject: string;
+  }>;
+  knowledgeSummary: string;
+}> {
+  const systemPrompt = `你是一个专业的教育AI考官。请根据本周学习的知识点，生成一套周回顾测试题。
+
+【要求】
+1. 题目必须紧扣本周学习的知识点
+2. 混合题型：单选题、多选题、填空题、简答题
+3. 难度分布：40%基础题、40%中等题、20%难题
+4. 每道题必须明确关联到具体知识点
+5. 提供详细答案解析
+6. 同时生成本周知识点学习总结
+
+请返回JSON格式：
+{
+  "knowledgeSummary": "本周知识点总结：学习了...重点包括...",
+  "questions": [
+    {
+      "content": "题目内容",
+      "options": [{"label": "A", "text": "选项A"}, {"label": "B", "text": "选项B"}, {"label": "C", "text": "选项C"}, {"label": "D", "text": "选项D"}],
+      "correctAnswer": "A",
+      "explanation": "详细解析",
+      "difficulty": 3,
+      "knowledgeNode": "知识点名称",
+      "subject": "科目名称"
+    }
+  ]
+}`;
+
+  const userPrompt = `请为第${weekData.weekNumber}周生成${questionCount}道回顾测试题。
+
+本周知识点：${weekData.knowledgeNodes.join("、")}
+本周科目：${weekData.subjects.join("、")}
+
+请从提供的文件中读取详细内容，生成测试题。`;
+
+  const contentBlocks: KimiContent[] = [
+    { type: "file_url", file_url: { url: fileUrl } },
+    { type: "text", text: userPrompt }
+  ];
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: contentBlocks },
+  ];
+
+  const result = await chatWithAI(
+    messages,
+    0.7,
+    apiKey,
+    apiUrl,
+    modelName,
+    true,
+    `generateWeeklyReview-week${weekData.weekNumber}`
+  );
+
+  try {
+    const jsonStr = extractJsonFromResponse(result);
+    const parsed = JSON.parse(jsonStr);
+    debugLog("generateWeeklyReviewQuestions 解析成功", {
+      weekNumber: weekData.weekNumber,
+      questionsCount: parsed.questions?.length,
+      summaryLength: parsed.knowledgeSummary?.length
+    });
+    return {
+      questions: parsed.questions || [],
+      knowledgeSummary: parsed.knowledgeSummary || "",
+    };
+  } catch (err) {
+    debugLogError("generateWeeklyReviewQuestions JSON解析失败", { error: err, result: result.slice(0, 2000) });
+    throw new Error("AI返回的测试数据格式不正确");
+  }
+}
+
+// 评估周回顾测试结果
+export async function evaluateWeeklyReview(
+  fileUrl: string,
+  weekData: {
+    weekNumber: number;
+    knowledgeNodes: string[];
+  },
+  answers: Array<{
+    questionIndex: number;
+    userAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+    knowledgeNode: string;
+  }>,
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  totalScore: number;
+  correctCount: number;
+  masteryLevel: number;
+  weakPoints: string[];
+  strongPoints: string[];
+  aiFeedback: string;
+}> {
+  const systemPrompt = `你是一个专业的教育AI评估师。请根据用户的周回顾测试答案，进行详细评估。
+
+【评估要求】
+1. 计算总分和正确率
+2. 评估每个知识点的掌握程度
+3. 识别薄弱知识点（正确率<60%）
+4. 识别掌握良好的知识点（正确率>=80%）
+5. 给出个性化的学习建议和下周学习重点
+
+请返回JSON格式：
+{
+  "totalScore": 85,
+  "correctCount": 8,
+  "masteryLevel": 85,
+  "weakPoints": ["薄弱知识点1", "薄弱知识点2"],
+  "strongPoints": ["掌握好的知识点1", "掌握好的知识点2"],
+  "aiFeedback": "本周学习表现良好，但在XX方面需要加强...建议下周重点复习..."
+}`;
+
+  const correctCount = answers.filter(a => a.isCorrect).length;
+  const accuracy = Math.round((correctCount / answers.length) * 100);
+
+  const userPrompt = `请评估第${weekData.weekNumber}周的回顾测试结果。
+
+本周知识点：${weekData.knowledgeNodes.join("、")}
+
+答题情况：
+共${answers.length}题，答对${correctCount}题，正确率${accuracy}%
+
+详细答题记录：
+${answers.map((a, i) => `第${i + 1}题(${a.knowledgeNode})：用户答案"${a.userAnswer}"，正确答案"${a.correctAnswer}"，${a.isCorrect ? "正确" : "错误"}`).join("\n")}
+
+请给出详细评估报告。`;
+
+  const contentBlocks: KimiContent[] = [
+    { type: "file_url", file_url: { url: fileUrl } },
+    { type: "text", text: userPrompt }
+  ];
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: contentBlocks },
+  ];
+
+  const result = await chatWithAI(
+    messages,
+    0.7,
+    apiKey,
+    apiUrl,
+    modelName,
+    true,
+    `evaluateWeeklyReview-week${weekData.weekNumber}`
+  );
+
+  try {
+    const jsonStr = extractJsonFromResponse(result);
+    const parsed = JSON.parse(jsonStr);
+    return {
+      totalScore: parsed.totalScore || 0,
+      correctCount: parsed.correctCount || correctCount,
+      masteryLevel: parsed.masteryLevel || accuracy,
+      weakPoints: parsed.weakPoints || [],
+      strongPoints: parsed.strongPoints || [],
+      aiFeedback: parsed.aiFeedback || "",
+    };
+  } catch (err) {
+    debugLogError("evaluateWeeklyReview JSON解析失败", { error: err, result: result.slice(0, 2000) });
+    // 返回基础评估
+    return {
+      totalScore: accuracy,
+      correctCount,
+      masteryLevel: accuracy,
+      weakPoints: [],
+      strongPoints: [],
+      aiFeedback: `本周测试正确率${accuracy}%，请继续努力。`,
+    };
+  }
+}
