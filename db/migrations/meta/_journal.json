@@ -71,6 +71,13 @@
       "when": 1780284157030,
       "tag": "0009_stormy_baron_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1780291316718,
+      "tag": "0010_sleepy_mandrill",
+      "breakpoints": true
     }
   ]
 }

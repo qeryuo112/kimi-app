@@ -395,6 +395,7 @@ export const reviewSchedules = mysqlTable("review_schedules", {
   reviewCount: int("reviewCount").default(0).notNull(), // 已复习次数
   mastery: int("mastery").default(0).notNull(), // 掌握度 0-100
   status: mysqlEnum("status", ["active", "mastered", "dropped"]).default("active").notNull(),
+  snapshot: text("snapshot"), // JSON：存储测试详情（题目、答案、掌握度变化等）
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

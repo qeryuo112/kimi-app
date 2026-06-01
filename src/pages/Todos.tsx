@@ -73,6 +73,10 @@ export default function Todos() {
   const [reviewTestQuestionType, setReviewTestQuestionType] = useState<"single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed">("mixed");
   const [reviewTestQuestionCount, setReviewTestQuestionCount] = useState(5);
 
+  // 复习详情查看状态
+  const [reviewDetailOpen, setReviewDetailOpen] = useState(false);
+  const [reviewDetailData, setReviewDetailData] = useState<any>(null);
+
   const questionTypeMap: Record<string, string> = {
     single_choice: "单选题",
     multiple_choice: "多选题",
@@ -184,6 +188,25 @@ export default function Todos() {
     onError: (err) => {
       alert(err.message);
     },
+  });
+
+  // 复习详情和回退
+  const getReviewDetail = trpc.todo.getReviewDetail.useMutation({
+    onSuccess: (data) => {
+      setReviewDetailData(data);
+      setReviewDetailOpen(true);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const rollbackReview = trpc.todo.rollbackReview.useMutation({
+    onSuccess: () => {
+      utils.todo.getReviews.invalidate();
+      utils.knowledge.list.invalidate();
+      utils.skill.list.invalidate();
+      toast.success("复习数据已回退");
+    },
+    onError: (err) => toast.error(err.message),
   });
 
   const skipTodo = trpc.todo.skip.useMutation({
@@ -513,17 +536,45 @@ export default function Todos() {
                   </div>
                   <div className="flex items-center justify-between mt-3">
                     <p className="text-xs text-muted-foreground">首次学习：{rev.originalStudyDate} · 间隔 {rev.intervalDays} 天</p>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setActiveReviewId(rev.id);
-                        setReviewTestStep("select-source");
-                        setReviewTestOpen(true);
-                      }}
-                    >
-                      <BrainCircuit className="h-4 w-4 mr-1" />
-                      AI考官
-                    </Button>
+                    <div className="flex gap-2">
+                      {rev.reviewCount > 0 && rev.snapshot && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => getReviewDetail.mutate({ reviewId: rev.id })}
+                          >
+                            <FileText className="h-4 w-4 mr-1" />
+                            查看详情
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                            onClick={() => {
+                              if (confirm("确定要回退此次复习的数据吗？这会恢复到复习前的掌握度，但保留复习记录。")) {
+                                rollbackReview.mutate({ reviewId: rev.id });
+                              }
+                            }}
+                            disabled={rollbackReview.isPending}
+                          >
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                            回退数据
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setActiveReviewId(rev.id);
+                          setReviewTestStep("select-source");
+                          setReviewTestOpen(true);
+                        }}
+                      >
+                        <BrainCircuit className="h-4 w-4 mr-1" />
+                        AI考官
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -1123,6 +1174,128 @@ export default function Todos() {
               <Button className="w-full" onClick={() => { setReviewTestOpen(false); setReviewTestResult(null); }}>
                 完成
               </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 复习详情查看弹窗 */}
+      <Dialog open={reviewDetailOpen} onOpenChange={setReviewDetailOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              复习详情
+            </DialogTitle>
+          </DialogHeader>
+
+          {reviewDetailData?.testDetails ? (
+            <div className="space-y-4">
+              {/* 基本信息 */}
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-lg font-bold">{reviewDetailData.testDetails.finalMastery}%</p>
+                  <p className="text-xs text-muted-foreground">综合掌握度</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {reviewDetailData.testDetails.previousMastery}% → {reviewDetailData.testDetails.newMastery}%
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-lg font-bold">{reviewDetailData.testDetails.correctCount}/{reviewDetailData.testDetails.totalQuestions}</p>
+                  <p className="text-xs text-muted-foreground">答对题数</p>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-lg font-bold">{new Date(reviewDetailData.testDetails.testDate).toLocaleDateString("zh-CN")}</p>
+                  <p className="text-xs text-muted-foreground">测试日期</p>
+                </div>
+              </div>
+
+              {/* 薄弱知识点 */}
+              {reviewDetailData.testDetails.weakPoints && reviewDetailData.testDetails.weakPoints.length > 0 && (
+                <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                  <p className="text-sm font-medium text-red-400 flex items-center gap-1">
+                    <XCircle className="h-4 w-4" />
+                    薄弱知识点
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {reviewDetailData.testDetails.weakPoints.map((p: string, i: number) => (
+                      <Badge key={i} variant="secondary" className="text-[10px]">{p}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* AI建议 */}
+              {reviewDetailData.testDetails.suggestions && reviewDetailData.testDetails.suggestions.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">AI建议</p>
+                  {reviewDetailData.testDetails.suggestions.map((s: string, i: number) => (
+                    <p key={i} className="text-xs text-muted-foreground flex items-start gap-1">
+                      <span className="text-primary mt-0.5">•</span>
+                      {s}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {/* 逐题详情 */}
+              <div className="space-y-2 max-h-80 overflow-auto">
+                <p className="text-sm font-medium">题目详情</p>
+                {reviewDetailData.testDetails.questions.map((q: any, idx: number) => (
+                  <div key={idx} className={`p-3 rounded text-sm ${q.isCorrect ? "bg-green-500/5" : "bg-red-500/5"}`}>
+                    <div className="flex items-start gap-2">
+                      {q.isCorrect ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-400 mt-0.5" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-400 mt-0.5" />
+                      )}
+                      <div className="flex-1">
+                        <p className="font-medium">{idx + 1}. {q.content}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          你的答案：{q.userAnswer || "未作答"} · 正确答案：{q.correctAnswer}
+                        </p>
+                        {q.explanation && (
+                          <p className="text-xs text-primary mt-1">{q.explanation}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setReviewDetailOpen(false)}
+                >
+                  关闭
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (confirm("确定要回退此次复习的数据吗？这会恢复到复习前的掌握度。")) {
+                      rollbackReview.mutate(
+                        { reviewId: reviewDetailData.review.id },
+                        {
+                          onSuccess: () => {
+                            setReviewDetailOpen(false);
+                            setReviewDetailData(null);
+                          }
+                        }
+                      );
+                    }
+                  }}
+                  disabled={rollbackReview.isPending}
+                >
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  回退数据
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <p>暂无详细测试记录</p>
             </div>
           )}
         </DialogContent>

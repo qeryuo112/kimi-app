@@ -12,6 +12,7 @@ import {
   skillDimensions,
   subjects,
   questions,
+  wrongAnswers,
 } from "@db/schema";
 import { eq, and, lte, desc, inArray } from "drizzle-orm";
 import { generateTodoTestQuestions, generateTodoTestFromFiles, evaluateTodoTestAnswers } from "./lib/ai";
@@ -262,25 +263,59 @@ export const todoRouter = createRouter({
         }
       })();
 
-      if (nodes.length === 0) throw new Error("该任务没有关联知识点，无法生成测试题");
+      // nodes 是字符串数组（知识点标题）
+      const nodeTitles: string[] = nodes.map((n: any) => typeof n === "string" ? n : n.title).filter(Boolean);
 
-      // 获取知识点详情用于映射
-      const nodeIds = nodes.map((n: any) => n.id).filter(Boolean);
-      const nodeDetails = nodeIds.length > 0
+      if (nodeTitles.length === 0) throw new Error("该任务没有关联知识点，无法生成测试题");
+
+      // 获取知识点详情用于映射（通过标题查找）
+      const nodeDetails = nodeTitles.length > 0
         ? await db
             .select()
             .from(knowledgeNodes)
             .where(and(
               eq(knowledgeNodes.userId, ctx.user.id),
-              inArray(knowledgeNodes.id, nodeIds)
+              // 使用标题匹配而不是ID匹配
+              inArray(knowledgeNodes.title, nodeTitles)
             ))
         : [];
-      const nodeMap = new Map(nodeDetails.map((n) => [n.id, n]));
+      const nodeMap = new Map(nodeDetails.map((n) => [n.title, n]));
 
       const [setting] = await db
         .select()
         .from(userSettings)
         .where(eq(userSettings.userId, ctx.user.id));
+
+      // 获取用户的错题记录
+      const userWrongAnswers = await db
+        .select()
+        .from(wrongAnswers)
+        .where(
+          and(
+            eq(wrongAnswers.userId, ctx.user.id),
+            eq(wrongAnswers.mastered, false)
+          )
+        );
+
+      // 获取学科的subjectId（宽松匹配）
+      let subjectId: number | null = null;
+      if (todo.subject) {
+        const allSubjects = await db
+          .select()
+          .from(subjects)
+          .where(eq(subjects.userId, ctx.user.id));
+
+        // 使用宽松匹配
+        const normalizedTodoSubject = todo.subject.trim().toLowerCase();
+        const matchedSubject = allSubjects.find(s =>
+          s.title.trim().toLowerCase() === normalizedTodoSubject ||
+          s.title.trim().toLowerCase().includes(normalizedTodoSubject) ||
+          normalizedTodoSubject.includes(s.title.trim().toLowerCase())
+        );
+        if (matchedSubject) {
+          subjectId = matchedSubject.id;
+        }
+      }
 
       // 智能选题：先从题库中找相关题目
       const allQuestions = await db
@@ -288,25 +323,81 @@ export const todoRouter = createRouter({
         .from(questions)
         .where(eq(questions.userId, ctx.user.id));
 
-      // 根据知识点匹配题目
+      // 标准化任务学科名称
+      const normalizedTodoSubject = todo.subject?.trim().toLowerCase() || "";
+
+      // 根据学科和知识点匹配题目
       const matchedQuestions = allQuestions.filter((q) => {
-        // 匹配 nodeId
-        if (q.nodeId && nodes.some((n: any) => n.id === q.nodeId)) return true;
-        // 匹配 detectedKnowledgePoint
+        // 匹配 subjectId
+        if (subjectId && q.subjectId === subjectId) return true;
+        // 匹配 detectedSubject（学科匹配）
+        if (q.detectedSubject && todo.subject) {
+          const normalizedQSubject = q.detectedSubject.trim().toLowerCase();
+          if (normalizedQSubject === normalizedTodoSubject ||
+              normalizedQSubject.includes(normalizedTodoSubject) ||
+              normalizedTodoSubject.includes(normalizedQSubject)) {
+            return true;
+          }
+        }
+        // 匹配 detectedKnowledgePoint（知识点标题匹配）
         if (q.detectedKnowledgePoint) {
-          return nodes.some((n: any) =>
-            n.title?.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
-            q.detectedKnowledgePoint!.toLowerCase().includes(n.title?.toLowerCase() || "")
+          const normalizedQKP = q.detectedKnowledgePoint.toLowerCase();
+          const kpMatch = nodeTitles.some((title: string) =>
+            title.toLowerCase().includes(normalizedQKP) ||
+            normalizedQKP.includes(title.toLowerCase())
           );
+          if (kpMatch) return true;
         }
         return false;
       });
 
+      // 给题目打分并排序（错题权重更高）
+      const scoredQuestions = matchedQuestions.map((q) => {
+        let score = 0;
+        // 基础匹配分数（可累加）
+        if (subjectId && q.subjectId === subjectId) score += 50;
+
+        // 知识点匹配 +40 分
+        if (q.detectedKnowledgePoint) {
+          const normalizedQKP = q.detectedKnowledgePoint.toLowerCase();
+          const kpMatch = nodeTitles.some((title: string) =>
+            title.toLowerCase().includes(normalizedQKP) ||
+            normalizedQKP.includes(title.toLowerCase())
+          );
+          if (kpMatch) score += 40;
+        }
+
+        // 学科匹配 +10 分
+        if (q.detectedSubject && todo.subject) {
+          const normalizedQSubject = q.detectedSubject.trim().toLowerCase();
+          if (normalizedQSubject === normalizedTodoSubject ||
+              normalizedQSubject.includes(normalizedTodoSubject) ||
+              normalizedTodoSubject.includes(normalizedQSubject)) {
+            score += 10;
+          }
+        }
+
+        // 错题权重：如果是错题，大幅提高分数
+        const isWrongAnswer = userWrongAnswers.some(wa =>
+          wa.questionContent === q.content ||
+          (wa.questionContent && q.content && wa.questionContent.includes(q.content.substring(0, 50)))
+        );
+        if (isWrongAnswer) score += 200;
+
+        return { question: q, score };
+      });
+
+      // 按分数排序并随机打乱同分题目
+      const sortedQuestions = scoredQuestions
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          return Math.random() - 0.5;
+        })
+        .map(sq => sq.question);
+
       // 如果题库中有足够题目，直接使用
-      if (matchedQuestions.length >= input.count) {
-        // 随机选择指定数量的题目
-        const shuffled = matchedQuestions.sort(() => 0.5 - Math.random());
-        const selected = shuffled.slice(0, input.count);
+      if (sortedQuestions.length >= input.count) {
+        const selected = sortedQuestions.slice(0, input.count);
 
         return {
           questions: selected.map((q) => ({
@@ -315,7 +406,7 @@ export const todoRouter = createRouter({
             options: q.options ? JSON.parse(q.options) : undefined,
             correctAnswer: q.correctAnswer,
             explanation: q.explanation || "",
-            knowledgePoint: q.detectedKnowledgePoint || nodeMap.get(q.nodeId)?.title || "综合",
+            knowledgePoint: q.detectedKnowledgePoint || "综合",
             questionType: q.questionType,
           })),
           source: "database",
@@ -806,7 +897,69 @@ export const todoRouter = createRouter({
         }
       }
 
-      // 8. 保存快照到任务（用于删除时回退）
+      // 9. 收集错题到错题本
+      for (const q of input.questions) {
+        const ans = input.answers.find(a => a.questionId === q.id);
+        if (!ans) continue;
+
+        const isChoice = q.questionType === "single_choice" || q.questionType === "multiple_choice";
+        let isCorrect = false;
+
+        if (isChoice) {
+          let userAns = ans.userAnswer.trim().toUpperCase();
+          let correctAns = q.correctAnswer.trim().toUpperCase();
+          if (q.questionType === "multiple_choice") {
+            userAns = userAns.split("").sort().join("");
+            correctAns = correctAns.split("").sort().join("");
+          }
+          isCorrect = userAns === correctAns;
+        } else {
+          // 非选择题根据AI评估判断是否错误
+          const questionEval = aiEvaluation?.details?.find((d: any) => d.questionId === q.id);
+          isCorrect = questionEval?.isCorrect || false;
+        }
+
+        // 如果答错，收录到错题本
+        if (!isCorrect) {
+          // 查找是否已存在该题目的错题记录
+          const existingWrong = await db
+            .select()
+            .from(wrongAnswers)
+            .where(
+              and(
+                eq(wrongAnswers.userId, ctx.user.id),
+                eq(wrongAnswers.questionContent, q.content)
+              )
+            )
+            .limit(1);
+
+          if (existingWrong.length > 0) {
+            // 更新错题记录
+            await db
+              .update(wrongAnswers)
+              .set({
+                wrongCount: existingWrong[0].wrongCount + 1,
+                lastWrongAt: new Date(),
+                mastered: false,
+              })
+              .where(eq(wrongAnswers.id, existingWrong[0].id));
+          } else {
+            // 创建新错题记录
+            await db
+              .insert(wrongAnswers)
+              .values({
+                userId: ctx.user.id,
+                questionContent: q.content,
+                userAnswer: ans.userAnswer,
+                wrongCount: 1,
+                lastWrongAt: new Date(),
+                mastered: false,
+              });
+          }
+        }
+      }
+
+      // 10. 保存快照到任务（用于删除时回退）
       await db
         .update(dailyTodos)
         .set({ snapshot: JSON.stringify(snapshot) })
@@ -987,26 +1140,103 @@ export const todoRouter = createRouter({
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       void _difficultyLevel;
 
+      // 查找对应的subjectId和nodeId
+      const subjectMatch = await db
+        .select()
+        .from(subjects)
+        .where(
+          and(
+            eq(subjects.userId, ctx.user.id),
+            eq(subjects.title, review.subjectTitle)
+          )
+        )
+        .limit(1);
+      const subjectId = subjectMatch.length > 0 ? subjectMatch[0].id : null;
+
+      const nodeMatch = await db
+        .select()
+        .from(knowledgeNodes)
+        .where(
+          and(
+            eq(knowledgeNodes.userId, ctx.user.id),
+            eq(knowledgeNodes.title, review.nodeTitle)
+          )
+        )
+        .limit(1);
+      const nodeId = nodeMatch.length > 0 ? nodeMatch[0].id : null;
+
+      // 获取用户的错题记录
+      const userWrongAnswers = await db
+        .select()
+        .from(wrongAnswers)
+        .where(
+          and(
+            eq(wrongAnswers.userId, ctx.user.id),
+            eq(wrongAnswers.mastered, false)
+          )
+        );
+
       // 智能选题：先从题库中找相关题目
       const allQuestions = await db
         .select()
         .from(questions)
         .where(eq(questions.userId, ctx.user.id));
 
-      // 根据知识点标题匹配题目
+      // 根据学科和知识点精确匹配题目
       const matchedQuestions = allQuestions.filter((q) => {
+        // 优先匹配nodeId（最精确）
+        if (nodeId && q.nodeId === nodeId) return true;
+        // 其次匹配subjectId
+        if (subjectId && q.subjectId === subjectId) return true;
         // 匹配 detectedKnowledgePoint
         if (q.detectedKnowledgePoint) {
-          return review.nodeTitle.toLowerCase().includes(q.detectedKnowledgePoint.toLowerCase()) ||
+          const kpMatch = review.nodeTitle.toLowerCase().includes(q.detectedKnowledgePoint.toLowerCase()) ||
             q.detectedKnowledgePoint.toLowerCase().includes(review.nodeTitle.toLowerCase());
+          if (kpMatch) return true;
+        }
+        // 匹配 detectedSubject
+        if (q.detectedSubject) {
+          const subMatch = review.subjectTitle.toLowerCase().includes(q.detectedSubject.toLowerCase()) ||
+            q.detectedSubject.toLowerCase().includes(review.subjectTitle.toLowerCase());
+          if (subMatch) return true;
         }
         return false;
       });
 
+      // 给题目打分并排序（错题权重更高）
+      const scoredQuestions = matchedQuestions.map((q) => {
+        let score = 0;
+        // 基础匹配分数
+        if (nodeId && q.nodeId === nodeId) score += 100;
+        else if (subjectId && q.subjectId === subjectId) score += 50;
+        else if (q.detectedKnowledgePoint) score += 30;
+        else if (q.detectedSubject) score += 10;
+
+        // 错题权重：如果是错题，大幅提高分数
+        const isWrongAnswer = userWrongAnswers.some(wa =>
+          wa.questionContent === q.content ||
+          (wa.questionContent && q.content && wa.questionContent.includes(q.content.substring(0, 50)))
+        );
+        if (isWrongAnswer) score += 200;
+
+        // 未掌握的知识点优先
+        if (review.mastery < 50) score += 50;
+        else if (review.mastery < 70) score += 30;
+
+        return { question: q, score };
+      });
+
+      // 按分数排序并随机打乱同分题目
+      const sortedQuestions = scoredQuestions
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          return Math.random() - 0.5; // 同分随机排序
+        })
+        .map(sq => sq.question);
+
       // 如果题库中有足够题目，直接使用
-      if (matchedQuestions.length >= input.count) {
-        const shuffled = matchedQuestions.sort(() => 0.5 - Math.random());
-        const selected = shuffled.slice(0, input.count);
+      if (sortedQuestions.length >= input.count) {
+        const selected = sortedQuestions.slice(0, input.count);
 
         return {
           questions: selected.map((q) => ({
@@ -1042,39 +1272,17 @@ export const todoRouter = createRouter({
       // 将AI生成的题目保存到题库
       const savedQuestionIds: number[] = [];
 
-      // 查找对应的 subjectId
-      const subjectMatch = await db
-        .select()
-        .from(subjects)
-        .where(
-          and(
-            eq(subjects.userId, ctx.user.id),
-            eq(subjects.title, review.subjectTitle)
-          )
-        )
-        .limit(1);
-      const subjectId = subjectMatch.length > 0 ? subjectMatch[0].id : null;
-
-      // 查找对应的 nodeId
-      const nodeMatch = await db
-        .select()
-        .from(knowledgeNodes)
-        .where(
-          and(
-            eq(knowledgeNodes.userId, ctx.user.id),
-            eq(knowledgeNodes.title, review.nodeTitle)
-          )
-        )
-        .limit(1);
-      const nodeId = nodeMatch.length > 0 ? nodeMatch[0].id : null;
+      // 使用前面已查找到的 subjectId 和 nodeId
+      const finalSubjectId = subjectId;
+      const finalNodeId = nodeId;
 
       for (const q of result.questions) {
         const [{ id }] = await db
           .insert(questions)
           .values({
             userId: ctx.user.id,
-            subjectId: subjectId,
-            nodeId: nodeId,
+            subjectId: finalSubjectId,
+            nodeId: finalNodeId,
             questionType: (q.questionType || input.questionType) as "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed",
             content: q.content,
             options: q.options ? JSON.stringify(q.options) : null,
@@ -1211,6 +1419,101 @@ export const todoRouter = createRouter({
       const nextDate = new Date();
       nextDate.setDate(nextDate.getDate() + newInterval);
 
+      // 收集测试详情用于保存
+      const testDetails: any = {
+        testDate: new Date().toISOString(),
+        questions: input.questions.map(q => {
+          const ans = input.answers.find(a => a.questionId === q.id);
+          const isChoice = q.questionType === "single_choice" || q.questionType === "multiple_choice";
+          let isCorrect = false;
+
+          if (isChoice && ans) {
+            let userAns = ans.userAnswer.trim().toUpperCase();
+            let correctAns = q.correctAnswer.trim().toUpperCase();
+            if (q.questionType === "multiple_choice") {
+              userAns = userAns.split("").sort().join("");
+              correctAns = correctAns.split("").sort().join("");
+            }
+            isCorrect = userAns === correctAns;
+          }
+
+          return {
+            ...q,
+            userAnswer: ans?.userAnswer || "",
+            isCorrect,
+          };
+        }),
+        correctCount,
+        totalQuestions,
+        newMastery,
+        previousMastery: review.mastery,
+        finalMastery,
+        suggestions: aiEvaluation?.suggestions || [],
+        weakPoints: aiEvaluation?.weakPoints || [],
+      };
+
+      // 将错题收录到错题本
+      for (const q of input.questions) {
+        const ans = input.answers.find(a => a.questionId === q.id);
+        if (!ans) continue;
+
+        const isChoice = q.questionType === "single_choice" || q.questionType === "multiple_choice";
+        let isCorrect = false;
+
+        if (isChoice) {
+          let userAns = ans.userAnswer.trim().toUpperCase();
+          let correctAns = q.correctAnswer.trim().toUpperCase();
+          if (q.questionType === "multiple_choice") {
+            userAns = userAns.split("").sort().join("");
+            correctAns = correctAns.split("").sort().join("");
+          }
+          isCorrect = userAns === correctAns;
+        } else {
+          // 非选择题根据AI评估判断是否错误
+          const questionEval = aiEvaluation?.details?.find((d: any) => d.questionId === q.id);
+          isCorrect = questionEval?.isCorrect || false;
+        }
+
+        // 如果答错，收录到错题本
+        if (!isCorrect) {
+          // 查找是否已存在该题目的错题记录
+          const existingWrong = await db
+            .select()
+            .from(wrongAnswers)
+            .where(
+              and(
+                eq(wrongAnswers.userId, ctx.user.id),
+                eq(wrongAnswers.questionContent, q.content)
+              )
+            )
+            .limit(1);
+
+          if (existingWrong.length > 0) {
+            // 更新错题记录
+            await db
+              .update(wrongAnswers)
+              .set({
+                wrongCount: existingWrong[0].wrongCount + 1,
+                lastWrongAt: new Date(),
+                mastered: false,
+              })
+              .where(eq(wrongAnswers.id, existingWrong[0].id));
+          } else {
+            // 创建新错题记录
+            await db
+              .insert(wrongAnswers)
+              .values({
+                userId: ctx.user.id,
+                questionContent: q.content,
+                userAnswer: ans.userAnswer,
+                wrongCount: 1,
+                lastWrongAt: new Date(),
+                mastered: false,
+              });
+          }
+        }
+      }
+
       // 更新复习调度
       const existingDates = (() => {
         try {
@@ -1229,6 +1532,7 @@ export const todoRouter = createRouter({
           mastery: finalMastery,
           reviewDates: JSON.stringify([...existingDates, new Date().toISOString().split("T")[0]]),
           status: finalMastery >= 95 && review.reviewCount >= 2 ? "mastered" : "active",
+          snapshot: JSON.stringify(testDetails),
         })
         .where(eq(reviewSchedules.id, input.reviewId));
 
@@ -1269,6 +1573,103 @@ export const todoRouter = createRouter({
         suggestions: aiEvaluation?.suggestions || [],
         weakPoints: aiEvaluation?.weakPoints || [],
         status: finalMastery >= 95 && review.reviewCount >= 2 ? "mastered" : "active",
+        testDetails,
       };
+    }),
+
+  // 获取复习测试详情
+  getReviewDetail: authedQuery
+    .input(z.object({ reviewId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [review] = await db
+        .select()
+        .from(reviewSchedules)
+        .where(and(eq(reviewSchedules.id, input.reviewId), eq(reviewSchedules.userId, ctx.user.id)));
+
+      if (!review) throw new Error("复习任务不存在");
+
+      // 解析snapshot
+      let testDetails = null;
+      if (review.snapshot) {
+        try {
+          testDetails = JSON.parse(review.snapshot);
+        } catch {
+          testDetails = null;
+        }
+      }
+
+      return {
+        review,
+        testDetails,
+      };
+    }),
+
+  // 回退复习测试数据（只回退掌握度等数据，不删除复习任务本身）
+  rollbackReview: authedQuery
+    .input(z.object({ reviewId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [review] = await db
+        .select()
+        .from(reviewSchedules)
+        .where(and(eq(reviewSchedules.id, input.reviewId), eq(reviewSchedules.userId, ctx.user.id)));
+
+      if (!review) throw new Error("复习任务不存在");
+      if (!review.snapshot) throw new Error("该复习记录没有可回退的数据");
+
+      // 解析snapshot
+      let snapshot: any;
+      try {
+        snapshot = JSON.parse(review.snapshot);
+      } catch {
+        throw new Error("解析快照数据失败");
+      }
+
+      // 回退知识节点掌握度
+      const knowledgeNode = await db
+        .select()
+        .from(knowledgeNodes)
+        .where(
+          and(
+            eq(knowledgeNodes.userId, ctx.user.id),
+            eq(knowledgeNodes.title, review.nodeTitle)
+          )
+        )
+        .limit(1);
+
+      if (knowledgeNode.length > 0) {
+        await db
+          .update(knowledgeNodes)
+          .set({ mastery: snapshot.previousMastery || 0 })
+          .where(eq(knowledgeNodes.id, knowledgeNode[0].id));
+      }
+
+      // 回退复习调度数据
+      const reviewDates = (() => {
+        try {
+          return JSON.parse(review.reviewDates || "[]");
+        } catch {
+          return [];
+        }
+      })();
+
+      // 移除最后一次复习日期
+      const updatedDates = reviewDates.slice(0, -1);
+
+      await db
+        .update(reviewSchedules)
+        .set({
+          reviewCount: Math.max(0, review.reviewCount - 1),
+          mastery: snapshot.previousMastery || 0,
+          reviewDates: JSON.stringify(updatedDates),
+          snapshot: null, // 清空snapshot
+          status: "active", // 重置为active状态
+        })
+        .where(eq(reviewSchedules.id, input.reviewId));
+
+      return { success: true, message: "复习数据已回退" };
     }),
 });
