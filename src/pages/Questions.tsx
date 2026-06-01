@@ -146,6 +146,59 @@ export default function Questions() {
     },
   });
 
+  // 更新题目
+  const updateQuestion = trpc.question.update.useMutation({
+    onSuccess: () => {
+      utils.question.list.invalidate();
+      toast.success("题目已更新");
+      setEditingQuestion(null);
+    },
+    onError: (err) => {
+      toast.error(err.message || "更新失败");
+    },
+  });
+
+  // 编辑状态
+  const [editingQuestion, setEditingQuestion] = useState<any>(null);
+  const [editForm, setEditForm] = useState({
+    content: "",
+    options: "",
+    correctAnswer: "",
+    explanation: "",
+    difficulty: 3,
+    imageUrl: "",
+  });
+  const [showAnswerMap, setShowAnswerMap] = useState<Record<number, boolean>>({});
+
+  const startEdit = (q: any) => {
+    setEditingQuestion(q);
+    setEditForm({
+      content: q.content,
+      options: q.options || "",
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation || "",
+      difficulty: q.difficulty,
+      imageUrl: q.imageUrl || "",
+    });
+  };
+
+  const handleUpdate = () => {
+    if (!editingQuestion) return;
+    updateQuestion.mutate({
+      id: editingQuestion.id,
+      content: editForm.content,
+      options: editForm.options,
+      correctAnswer: editForm.correctAnswer,
+      explanation: editForm.explanation,
+      difficulty: editForm.difficulty,
+      imageUrl: editForm.imageUrl || null,
+    });
+  };
+
+  const toggleAnswer = (id: number) => {
+    setShowAnswerMap((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const handleGenerate = () => {
     if (generateMode === "text") {
       if (!genForm.topic.trim()) return;
@@ -329,90 +382,113 @@ export default function Questions() {
     return <span dangerouslySetInnerHTML={{ __html: processed }} />;
   };
 
-  const renderQuestionCard = (q: any, showAnswer = true, selectable = false) => (
-    <Card key={q.id} className="hover:border-primary/30 transition-colors">
-      <CardContent className="pt-4">
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex gap-2 flex-wrap items-center">
-            {selectable && (
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-border"
-                checked={selectedQuestions.has(q.id)}
-                onChange={(e) => {
-                  const next = new Set(selectedQuestions);
-                  if (e.target.checked) next.add(q.id);
-                  else next.delete(q.id);
-                  setSelectedQuestions(next);
-                }}
-              />
-            )}
-            <Badge className={difficultyMap[q.difficulty]?.color || ""}>
-              {difficultyMap[q.difficulty]?.label || `难度${q.difficulty}`}
-            </Badge>
-            <Badge variant="outline">{questionTypeMap[q.questionType] || q.questionType}</Badge>
-            {q.aiGenerated && (
-              <Badge variant="outline" className="bg-primary/10">
-                <Sparkles className="h-3 w-3 mr-1" />
-                AI
+  const renderQuestionCard = (q: any, _showAnswer = true, selectable = false) => {
+    const isShowingAnswer = showAnswerMap[q.id];
+    return (
+      <Card key={q.id} className="hover:border-primary/30 transition-colors">
+        <CardContent className="pt-4">
+          <div className="flex items-start justify-between mb-2">
+            <div className="flex gap-2 flex-wrap items-center">
+              {selectable && (
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border"
+                  checked={selectedQuestions.has(q.id)}
+                  onChange={(e) => {
+                    const next = new Set(selectedQuestions);
+                    if (e.target.checked) next.add(q.id);
+                    else next.delete(q.id);
+                    setSelectedQuestions(next);
+                  }}
+                />
+              )}
+              <Badge className={difficultyMap[q.difficulty]?.color || ""}>
+                {difficultyMap[q.difficulty]?.label || `难度${q.difficulty}`}
               </Badge>
+              <Badge variant="outline">{questionTypeMap[q.questionType] || q.questionType}</Badge>
+              {q.aiGenerated && (
+                <Badge variant="outline" className="bg-primary/10">
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  AI
+                </Badge>
+              )}
+            </div>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 h-6 px-1.5"
+                onClick={() => startEdit(q)}
+              >
+                <span className="text-xs">编辑</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-6 px-1.5"
+                onClick={() => {
+                  if (confirm("确定要删除这道题目吗？")) {
+                    deleteQuestion.mutate({ id: q.id });
+                  }
+                }}
+                disabled={deleteQuestion.isPending}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+          {q.imageUrl && (
+            <div className="mb-3 p-2 rounded bg-secondary/30 border border-border text-center">
+              <div className="text-xs text-muted-foreground mb-1">【图片】{q.imageUrl}</div>
+              {(q.imageUrl.startsWith("http") || q.imageUrl.startsWith("/uploads/")) && (
+                <img src={q.imageUrl} alt="题目图片" className="max-h-[200px] mx-auto rounded" />
+              )}
+            </div>
+          )}
+          <p className="text-sm font-medium mb-3">{q.content}</p>
+          {q.options && (
+            <div className="space-y-1.5 mb-3">
+              {(() => {
+                try {
+                  const opts = JSON.parse(q.options);
+                  return opts.map((opt: any) => (
+                    <div key={opt.label} className="flex items-center gap-2 text-sm">
+                      <span className="font-medium text-primary">{opt.label}.</span>
+                      <span>{renderLatexText(opt.text)}</span>
+                    </div>
+                  ));
+                } catch {
+                  return null;
+                }
+              })()}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => toggleAnswer(q.id)}
+              className="h-7 text-xs"
+            >
+              {isShowingAnswer ? "隐藏答案" : "显示答案"}
+            </Button>
+            {isShowingAnswer && (
+              <div className="text-sm text-muted-foreground">
+                <span className="font-medium text-green-400">答案：</span>
+                {q.correctAnswer}
+              </div>
             )}
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-6 px-1.5"
-            onClick={() => {
-              if (confirm("确定要删除这道题目吗？")) {
-                deleteQuestion.mutate({ id: q.id });
-              }
-            }}
-            disabled={deleteQuestion.isPending}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-        {q.imageUrl && (
-          <div className="mb-3 p-2 rounded bg-secondary/30 border border-border text-center">
-            <div className="text-xs text-muted-foreground mb-1">【图片】{q.imageUrl}</div>
-            {(q.imageUrl.startsWith("http") || q.imageUrl.startsWith("/uploads/")) && (
-              <img src={q.imageUrl} alt="题目图片" className="max-h-[200px] mx-auto rounded" />
-            )}
-          </div>
-        )}
-        <p className="text-sm font-medium mb-3">{q.content}</p>
-        {q.options && (
-          <div className="space-y-1.5 mb-3">
-            {(() => {
-              try {
-                const opts = JSON.parse(q.options);
-                return opts.map((opt: any) => (
-                  <div key={opt.label} className="flex items-center gap-2 text-sm">
-                    <span className="font-medium text-primary">{opt.label}.</span>
-                    <span>{renderLatexText(opt.text)}</span>
-                  </div>
-                ));
-              } catch {
-                return null;
-              }
-            })()}
-          </div>
-        )}
-        {showAnswer && (
-          <div className="text-sm text-muted-foreground">
-            <span className="font-medium text-green-400">答案：</span>
-            {q.correctAnswer}
-          </div>
-        )}
-        {q.explanation && (
-          <div className="text-sm text-muted-foreground mt-2">
-            <span className="font-medium">解析：</span>
-            {q.explanation}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+          {isShowingAnswer && q.explanation && (
+            <div className="text-sm text-muted-foreground mt-2">
+              <span className="font-medium">解析：</span>
+              {q.explanation}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -438,6 +514,84 @@ export default function Questions() {
           </Button>
         </div>
       </div>
+
+      {/* 编辑题目对话框 */}
+      {editingQuestion && (
+        <Card className="mb-6 border-primary/30 fixed inset-4 z-50 max-h-[90vh] overflow-auto">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <span>编辑题目</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">题目内容</label>
+              <Textarea
+                value={editForm.content}
+                onChange={(e) => setEditForm({ ...editForm, content: e.target.value })}
+                className="min-h-[100px]"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">选项（JSON格式）</label>
+              <Textarea
+                value={editForm.options}
+                onChange={(e) => setEditForm({ ...editForm, options: e.target.value })}
+                placeholder='[{"label":"A","text":"选项A"},...]'
+                className="min-h-[80px]"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">正确答案</label>
+              <Input
+                value={editForm.correctAnswer}
+                onChange={(e) => setEditForm({ ...editForm, correctAnswer: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">解析</label>
+              <Textarea
+                value={editForm.explanation}
+                onChange={(e) => setEditForm({ ...editForm, explanation: e.target.value })}
+                className="min-h-[60px]"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">图片URL</label>
+              <Input
+                value={editForm.imageUrl}
+                onChange={(e) => setEditForm({ ...editForm, imageUrl: e.target.value })}
+                placeholder="http://..."
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">难度</label>
+              <Select
+                value={String(editForm.difficulty)}
+                onValueChange={(v) => setEditForm({ ...editForm, difficulty: parseInt(v) })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">简单</SelectItem>
+                  <SelectItem value="2">较易</SelectItem>
+                  <SelectItem value="3">中等</SelectItem>
+                  <SelectItem value="4">较难</SelectItem>
+                  <SelectItem value="5">困难</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={handleUpdate} disabled={updateQuestion.isPending} className="flex-1">
+                {updateQuestion.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                保存
+              </Button>
+              <Button variant="outline" onClick={() => setEditingQuestion(null)} className="flex-1">
+                取消
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 统计卡片 */}
       {stats && (

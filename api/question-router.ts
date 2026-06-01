@@ -226,6 +226,38 @@ export const questionRouter = createRouter({
       return { success: true, questions: savedQuestions };
     }),
 
+  // 更新题目
+  update: authedQuery
+    .input(
+      z.object({
+        id: z.number(),
+        content: z.string().optional(),
+        options: z.string().optional(),
+        correctAnswer: z.string().optional(),
+        explanation: z.string().optional(),
+        difficulty: z.number().min(1).max(5).optional(),
+        imageUrl: z.string().nullable().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      const updateData: Partial<typeof questions.$inferInsert> = {};
+
+      if (input.content !== undefined) updateData.content = input.content;
+      if (input.options !== undefined) updateData.options = input.options;
+      if (input.correctAnswer !== undefined) updateData.correctAnswer = input.correctAnswer;
+      if (input.explanation !== undefined) updateData.explanation = input.explanation;
+      if (input.difficulty !== undefined) updateData.difficulty = input.difficulty;
+      if (input.imageUrl !== undefined) updateData.imageUrl = input.imageUrl;
+
+      await db
+        .update(questions)
+        .set(updateData)
+        .where(and(eq(questions.id, input.id), eq(questions.userId, ctx.user.id)));
+
+      return { success: true };
+    }),
+
   // 删除题目
   delete: authedQuery
     .input(z.object({ id: z.number() }))
