@@ -6,6 +6,8 @@ import { eq, and, desc } from "drizzle-orm";
 import {
   analyzeContentForKnowledgeTree,
   analyzeContentForSkills,
+  analyzeFilesForKnowledgeTree,
+  analyzeFilesForSkills,
 } from "./lib/ai";
 
 export const subjectRouter = createRouter({
@@ -143,23 +145,49 @@ export const subjectRouter = createRouter({
           .from(userSettings)
           .where(eq(userSettings.userId, ctx.user.id));
 
-        // 1. AI分析生成知识树（同时返回科目难度和优先级）
-        const knowledgeResult = await analyzeContentForKnowledgeTree(
-          subject.sourceContent,
-          subject.title,
-          setting?.aiApiKey || undefined,
-          setting?.aiApiEndpoint || undefined,
-          setting?.aiModel || undefined
-        );
+        // 检测内容是否包含文件URL（http/https链接）
+        const fileUrlRegex = /https?:\/\/[^\s]+\.(?:pdf|doc|docx|txt|png|jpg|jpeg|gif|webp)/gi;
+        const fileUrls = subject.sourceContent ? subject.sourceContent.match(fileUrlRegex) || [] : [];
+        const hasFileUrls = fileUrls.length > 0;
 
-        // 2. AI分析生成技能维度
-        const skillsResult = await analyzeContentForSkills(
-          subject.sourceContent,
-          subject.title,
-          setting?.aiApiKey || undefined,
-          setting?.aiApiEndpoint || undefined,
-          setting?.aiModel || undefined
-        );
+        let knowledgeResult;
+        let skillsResult;
+
+        if (hasFileUrls) {
+          // 使用文件分析模式
+          knowledgeResult = await analyzeFilesForKnowledgeTree(
+            fileUrls,
+            subject.title,
+            setting?.aiApiKey || undefined,
+            setting?.aiApiEndpoint || undefined,
+            setting?.aiModel || undefined
+          );
+
+          skillsResult = await analyzeFilesForSkills(
+            fileUrls,
+            subject.title,
+            setting?.aiApiKey || undefined,
+            setting?.aiApiEndpoint || undefined,
+            setting?.aiModel || undefined
+          );
+        } else {
+          // 使用文本分析模式
+          knowledgeResult = await analyzeContentForKnowledgeTree(
+            subject.sourceContent,
+            subject.title,
+            setting?.aiApiKey || undefined,
+            setting?.aiApiEndpoint || undefined,
+            setting?.aiModel || undefined
+          );
+
+          skillsResult = await analyzeContentForSkills(
+            subject.sourceContent,
+            subject.title,
+            setting?.aiApiKey || undefined,
+            setting?.aiApiEndpoint || undefined,
+            setting?.aiModel || undefined
+          );
+        }
 
         // 3. 保存知识节点到数据库
         const titleToIdMap = new Map<string, number>();

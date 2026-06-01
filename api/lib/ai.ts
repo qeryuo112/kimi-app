@@ -200,6 +200,109 @@ ${content.trim().length > title.length + 5 ? `内容：\n${content.slice(0, 8000
   }
 }
 
+// 从文件URL分析科目内容并生成知识树
+export async function analyzeFilesForKnowledgeTree(
+  urls: string[],
+  title: string,
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  nodes: Array<{
+    title: string;
+    description: string;
+    level: number;
+    orderIndex: number;
+    importance: number;
+    difficulty: number;
+    estimatedMinutes: number;
+    tags: string[];
+    parentTitle?: string;
+  }>;
+  edges: Array<{
+    sourceTitle: string;
+    targetTitle: string;
+    relationType: string;
+    strength: number;
+  }>;
+  subjectDifficulty: number;
+  subjectPriority: number;
+}> {
+  const systemPrompt = `你是一个专业的教育内容分析AI。请仔细阅读用户提供的文件（教材、课件、参考资料等），提取知识结构并生成知识树。
+
+要求：
+1. 从文件中识别主要章节和关键知识点
+2. 建立知识点之间的层次关系（父子关系）
+3. 识别知识点之间的关联（前置知识、相关、扩展、组成）
+4. 为每个知识点评估重要性(1-5)和难度(1-5)
+5. 估算每个知识点的学习时间(分钟)
+6. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
+   - 难度：根据内容深度、抽象程度、前置知识要求
+   - 优先级：根据该科目在学科体系中的基础性和重要性
+7. 确保生成至少8-15个知识节点，覆盖该科目的核心内容
+
+请严格按照JSON格式返回，不要包含任何其他文本。格式如下：
+{
+  "subjectDifficulty": 3,
+  "subjectPriority": 4,
+  "nodes": [
+    {
+      "title": "知识节点标题",
+      "description": "详细描述",
+      "level": 1,
+      "orderIndex": 0,
+      "importance": 4,
+      "difficulty": 3,
+      "estimatedMinutes": 45,
+      "tags": ["tag1", "tag2"],
+      "parentTitle": "父节点标题（根节点省略）"
+    }
+  ],
+  "edges": [
+    {
+      "sourceTitle": "源节点标题",
+      "targetTitle": "目标节点标题",
+      "relationType": "prerequisite|related|extends|partOf",
+      "strength": 3
+    }
+  ]
+}`;
+
+  // 构建多模态内容块
+  const contentBlocks: KimiContent[] = urls.map((url) => {
+    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+    if (imageExts.includes(ext)) {
+      return { type: "image_url", image_url: { url } };
+    }
+    return { type: "file_url", file_url: { url } };
+  });
+
+  const userPrompt = `请从以上文件中提取知识树结构，科目名称：${title}`;
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: [...contentBlocks, { type: "text", text: userPrompt }],
+    },
+  ];
+
+  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true);
+
+  try {
+    const parsed = JSON.parse(result);
+    return {
+      nodes: parsed.nodes || [],
+      edges: parsed.edges || [],
+      subjectDifficulty: parsed.subjectDifficulty || 3,
+      subjectPriority: parsed.subjectPriority || 2,
+    };
+  } catch {
+    throw new Error("AI返回的数据格式不正确");
+  }
+}
+
 // 分析内容生成技能维度
 export async function analyzeContentForSkills(
   content: string,
@@ -261,6 +364,80 @@ ${content.slice(0, 8000)}
     modelName,
     true
   );
+
+  try {
+    const parsed = JSON.parse(result);
+    return {
+      skills: parsed.skills || [],
+    };
+  } catch {
+    throw new Error("AI返回的技能数据格式不正确");
+  }
+}
+
+// 从文件URL分析技能维度
+export async function analyzeFilesForSkills(
+  urls: string[],
+  title: string,
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  skills: Array<{
+    name: string;
+    description: string;
+    category: string;
+    icon: string;
+    color: string;
+    weight: number;
+    parentName?: string;
+  }>;
+}> {
+  const systemPrompt = `你是一个专业技能分析AI。请仔细阅读用户提供的文件（教材、课件、参考资料等），提取需要掌握的技能维度。
+
+要求：
+1. 从文件中识别核心技能和子技能
+2. 建立技能的层次结构（支持技能树）
+3. 为每个技能分配权重(0.1-5.0，表示重要性)
+4. 为每个技能选择合适的图标(lucide-react图标名称)和颜色(hex格式)
+5. 将技能分类（认知技能、实践技能、思维技能、工具技能等）
+
+请严格按照JSON格式返回。格式如下：
+{
+  "skills": [
+    {
+      "name": "技能名称",
+      "description": "技能描述",
+      "category": "技能分类",
+      "icon": "Brain",
+      "color": "#3b82f6",
+      "weight": 2.5,
+      "parentName": "父技能名称（顶级技能省略）"
+    }
+  ]
+}`;
+
+  // 构建多模态内容块
+  const contentBlocks: KimiContent[] = urls.map((url) => {
+    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+    if (imageExts.includes(ext)) {
+      return { type: "image_url", image_url: { url } };
+    }
+    return { type: "file_url", file_url: { url } };
+  });
+
+  const userPrompt = `请从以上文件中提取技能维度，科目名称：${title}`;
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: [...contentBlocks, { type: "text", text: userPrompt }],
+    },
+  ];
+
+  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true);
 
   try {
     const parsed = JSON.parse(result);

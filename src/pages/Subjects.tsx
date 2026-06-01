@@ -38,6 +38,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
+  Upload,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -112,6 +114,13 @@ export default function Subjects() {
     color: "#3b82f6",
   });
 
+  // 文件上传状态
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [sourceMode, setSourceMode] = useState<"text" | "file">("text");
+
+  const { data: settings } = trpc.settings.get.useQuery();
+
   const resetForm = () => {
     setForm({
       title: "",
@@ -123,6 +132,53 @@ export default function Subjects() {
       priority: 2,
       color: "#3b82f6",
     });
+    setUploadedFiles([]);
+    setSourceMode("text");
+  };
+
+  // 文件上传处理
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileServerUrl = settings?.fileServerUrl?.trim();
+    if (!fileServerUrl) {
+      toast.error("请先在设置中配置文件上传服务器地址");
+      return;
+    }
+
+    setIsUploading(true);
+    const newFiles: Array<{ url: string; name: string }> = [];
+
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast.error(`${file.name} 上传失败: ${err.error || res.statusText}`);
+          continue;
+        }
+        const data = await res.json();
+        if (data.url) {
+          newFiles.push({ url: data.url, name: file.name });
+        }
+      } catch (err: any) {
+        toast.error(`${file.name} 上传失败: ${err.message}`);
+      }
+    }
+
+    setUploadedFiles((prev) => [...prev, ...newFiles]);
+    setIsUploading(false);
+    e.target.value = "";
+  };
+
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleCreate = () => {
@@ -130,7 +186,14 @@ export default function Subjects() {
       toast.error("请输入科目名称");
       return;
     }
-    createSubject.mutate(form);
+
+    // 如果是文件模式，将文件URL作为sourceContent
+    if (sourceMode === "file" && uploadedFiles.length > 0) {
+      const fileUrls = uploadedFiles.map(f => f.url).join("\n");
+      createSubject.mutate({ ...form, sourceContent: fileUrls });
+    } else {
+      createSubject.mutate(form);
+    }
   };
 
   const handleAnalyze = (id: number) => {
@@ -264,16 +327,52 @@ export default function Subjects() {
 
                 <Separator />
 
+                {/* 内容来源方式选择 */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium flex items-center gap-2">
                     <FileText className="h-4 w-4 text-primary" />
-                    内容文本（用于AI分析）
+                    内容来源（用于AI分析）
                   </label>
-                  <p className="text-xs text-muted-foreground">
-                    粘贴书籍目录、课程大纲或学习内容的文本，AI将自动分析并生成知识树和技能维度
-                  </p>
-                  <Textarea
-                    placeholder="粘贴内容目录或学习大纲...
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => setSourceMode("text")}
+                      className={`p-3 rounded-lg border text-left transition-colors ${
+                        sourceMode === "text"
+                          ? "border-primary bg-primary/10"
+                          : "border-border hover:bg-secondary/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <FileText className="h-4 w-4 text-primary" />
+                        <span className="font-medium">粘贴文本</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">粘贴目录、大纲或学习内容</p>
+                    </button>
+                    <button
+                      onClick={() => setSourceMode("file")}
+                      className={`p-3 rounded-lg border text-left transition-colors ${
+                        sourceMode === "file"
+                          ? "border-primary bg-primary/10"
+                          : "border-border hover:bg-secondary/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Upload className="h-4 w-4 text-primary" />
+                        <span className="font-medium">上传文件</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">上传PDF、Word或图片，AI直接读取</p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 文本输入模式 */}
+                {sourceMode === "text" && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      粘贴书籍目录、课程大纲或学习内容的文本，AI将自动分析并生成知识树和技能维度
+                    </p>
+                    <Textarea
+                      placeholder="粘贴内容目录或学习大纲...
 
 例如：
 第一章 函数与极限
@@ -284,11 +383,50 @@ export default function Subjects() {
   2.1 导数的概念
   2.2 求导法则
 ..."
-                    value={form.sourceContent}
-                    onChange={(e) => setForm({ ...form, sourceContent: e.target.value })}
-                    className="min-h-[200px] font-mono text-sm"
-                  />
-                </div>
+                      value={form.sourceContent}
+                      onChange={(e) => setForm({ ...form, sourceContent: e.target.value })}
+                      className="min-h-[200px] font-mono text-sm"
+                    />
+                  </div>
+                )}
+
+                {/* 文件上传模式 */}
+                {sourceMode === "file" && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      上传教材、课件或参考资料，AI将直接读取文件内容并分析生成知识树
+                    </p>
+                    <Input
+                      type="file"
+                      multiple
+                      accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                      onChange={handleFileUpload}
+                      disabled={isUploading}
+                    />
+                    {isUploading && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        上传中...
+                      </p>
+                    )}
+                    {uploadedFiles.length > 0 && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">已上传的文件 ({uploadedFiles.length})</label>
+                        <div className="space-y-1.5">
+                          {uploadedFiles.map((file, idx) => (
+                            <div key={idx} className="flex items-center gap-2 text-sm p-2 rounded bg-secondary/30">
+                              <FileText className="h-4 w-4 text-primary" />
+                              <span className="flex-1 truncate">{file.name}</span>
+                              <Button size="sm" variant="ghost" onClick={() => removeFile(idx)} className="h-6 w-6 p-0">
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </ScrollArea>
             <DialogFooter>
@@ -297,7 +435,7 @@ export default function Subjects() {
               </DialogClose>
               <Button
                 onClick={handleCreate}
-                disabled={createSubject.isPending}
+                disabled={createSubject.isPending || isUploading || (sourceMode === "file" && uploadedFiles.length === 0 && !form.sourceContent)}
                 className="gap-2"
               >
                 {createSubject.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
