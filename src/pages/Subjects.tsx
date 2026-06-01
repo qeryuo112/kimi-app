@@ -232,14 +232,14 @@ export default function Subjects() {
               导入科目
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <BookOpen className="h-5 w-5 text-primary" />
                 导入新科目
               </DialogTitle>
             </DialogHeader>
-            <ScrollArea className="flex-1 pr-4">
+            <ScrollArea className="flex-1 pr-4 min-h-0" style={{ maxHeight: 'calc(90vh - 180px)' }}>
               <div className="space-y-4 py-2">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -453,6 +453,7 @@ export default function Subjects() {
                             </div>
                           ))}
                         </div>
+                        <p className="text-xs text-muted-foreground text-center mt-2">↓ 向下滑动查看创建按钮 ↓</p>
                       </div>
                     )}
                   </div>
