@@ -349,7 +349,10 @@ export default function Subjects() {
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setSourceMode("text")}
+                      onClick={() => {
+                        console.log("[DEBUG] 切换到文本模式");
+                        setSourceMode("text");
+                      }}
                       className={`p-3 rounded-lg border text-left transition-colors ${
                         sourceMode === "text"
                           ? "border-primary bg-primary/10"
@@ -364,7 +367,10 @@ export default function Subjects() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setSourceMode("file")}
+                      onClick={() => {
+                        console.log("[DEBUG] 切换到文件模式");
+                        setSourceMode("file");
+                      }}
                       className={`p-3 rounded-lg border text-left transition-colors ${
                         sourceMode === "file"
                           ? "border-primary bg-primary/10"
@@ -411,8 +417,12 @@ export default function Subjects() {
                     <p className="text-xs text-muted-foreground">
                       上传教材、课件或参考资料，AI将直接读取文件内容并分析生成知识树
                     </p>
+                    <div className="text-xs text-green-400">当前模式: {sourceMode}</div>
                     <div className="relative border border-dashed border-border rounded-lg p-6 text-center hover:bg-secondary/30 transition-colors cursor-pointer"
-                      onClick={() => document.getElementById('subject-file-input')?.click()}
+                      onClick={() => {
+                        console.log("[DEBUG] 点击上传区域");
+                        document.getElementById('subject-file-input')?.click();
+                      }}
                     >
                       <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                       <p className="text-sm text-muted-foreground">点击选择文件</p>
