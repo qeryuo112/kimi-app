@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { questions, userAnswers, wrongAnswers, knowledgeNodes, userSettings } from "@db/schema";
+import { questions, userAnswers, wrongAnswers, knowledgeNodes, userSettings, subjects } from "@db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { generateQuestions, generateQuestionsFromFileUrls, evaluateAnswer, recognizeQuestionsFromUrls } from "./lib/ai";
 
