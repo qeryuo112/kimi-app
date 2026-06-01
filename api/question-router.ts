@@ -90,15 +90,56 @@ export const questionRouter = createRouter({
         setting?.aiModel || undefined
       );
 
+      // 获取用户的学科和知识点列表，用于AI识别匹配
+      const userSubjects = await db
+        .select()
+        .from(subjects)
+        .where(eq(subjects.userId, ctx.user.id));
+
+      const userNodes = await db
+        .select()
+        .from(knowledgeNodes)
+        .where(eq(knowledgeNodes.userId, ctx.user.id));
+
       // 保存题目到数据库
       const savedQuestions = [];
       for (const q of result.questions) {
+        // 尝试根据AI识别的学科和知识点匹配本地数据
+        let matchedSubjectId = input.subjectId;
+        let matchedNodeId = input.nodeId;
+
+        if (!matchedSubjectId && q.detectedSubject) {
+          // 尝试匹配学科名称（模糊匹配）
+          const matchedSubject = userSubjects.find(
+            s => s.title.toLowerCase().includes(q.detectedSubject!.toLowerCase()) ||
+                 q.detectedSubject!.toLowerCase().includes(s.title.toLowerCase())
+          );
+          if (matchedSubject) {
+            matchedSubjectId = matchedSubject.id;
+          }
+        }
+
+        if (!matchedNodeId && q.detectedKnowledgePoint) {
+          // 尝试匹配知识点名称（模糊匹配）
+          const matchedNode = userNodes.find(
+            n => n.title.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
+                 q.detectedKnowledgePoint!.toLowerCase().includes(n.title.toLowerCase())
+          );
+          if (matchedNode) {
+            matchedNodeId = matchedNode.id;
+            // 如果匹配到知识点但没有匹配到学科，使用知识点的学科
+            if (!matchedSubjectId) {
+              matchedSubjectId = matchedNode.subjectId;
+            }
+          }
+        }
+
         const [{ id }] = await db
           .insert(questions)
           .values({
             userId: ctx.user.id,
-            subjectId: input.subjectId,
-            nodeId: input.nodeId,
+            subjectId: matchedSubjectId,
+            nodeId: matchedNodeId,
             skillId: input.skillId,
             questionType: input.questionType,
             content: q.content,
@@ -108,10 +149,12 @@ export const questionRouter = createRouter({
             difficulty: q.difficulty,
             imageUrl: q.imageUrl || null,
             aiGenerated: true,
+            detectedSubject: q.detectedSubject || null,
+            detectedKnowledgePoint: q.detectedKnowledgePoint || null,
           })
           .$returningId();
 
-        savedQuestions.push({ id, ...q });
+        savedQuestions.push({ id, ...q, subjectId: matchedSubjectId, nodeId: matchedNodeId });
       }
 
       return { success: true, questions: savedQuestions };
@@ -147,15 +190,53 @@ export const questionRouter = createRouter({
         setting?.aiModel || undefined
       );
 
+      // 获取用户的学科和知识点列表，用于AI识别匹配
+      const userSubjects = await db
+        .select()
+        .from(subjects)
+        .where(eq(subjects.userId, ctx.user.id));
+
+      const userNodes = await db
+        .select()
+        .from(knowledgeNodes)
+        .where(eq(knowledgeNodes.userId, ctx.user.id));
+
       // 保存题目到数据库
       const savedQuestions = [];
       for (const q of result.questions) {
+        // 尝试根据AI识别的学科和知识点匹配本地数据
+        let matchedSubjectId = input.subjectId;
+        let matchedNodeId = input.nodeId;
+
+        if (!matchedSubjectId && q.detectedSubject) {
+          const matchedSubject = userSubjects.find(
+            s => s.title.toLowerCase().includes(q.detectedSubject!.toLowerCase()) ||
+                 q.detectedSubject!.toLowerCase().includes(s.title.toLowerCase())
+          );
+          if (matchedSubject) {
+            matchedSubjectId = matchedSubject.id;
+          }
+        }
+
+        if (!matchedNodeId && q.detectedKnowledgePoint) {
+          const matchedNode = userNodes.find(
+            n => n.title.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
+                 q.detectedKnowledgePoint!.toLowerCase().includes(n.title.toLowerCase())
+          );
+          if (matchedNode) {
+            matchedNodeId = matchedNode.id;
+            if (!matchedSubjectId) {
+              matchedSubjectId = matchedNode.subjectId;
+            }
+          }
+        }
+
         const [{ id }] = await db
           .insert(questions)
           .values({
             userId: ctx.user.id,
-            subjectId: input.subjectId,
-            nodeId: input.nodeId,
+            subjectId: matchedSubjectId,
+            nodeId: matchedNodeId,
             skillId: input.skillId,
             questionType: input.questionType,
             content: q.content,
@@ -165,10 +246,12 @@ export const questionRouter = createRouter({
             difficulty: q.difficulty,
             imageUrl: q.imageUrl || null,
             aiGenerated: true,
+            detectedSubject: q.detectedSubject || null,
+            detectedKnowledgePoint: q.detectedKnowledgePoint || null,
           })
           .$returningId();
 
-        savedQuestions.push({ id, ...q });
+        savedQuestions.push({ id, ...q, subjectId: matchedSubjectId, nodeId: matchedNodeId });
       }
 
       return { success: true, questions: savedQuestions };
@@ -200,14 +283,52 @@ export const questionRouter = createRouter({
         setting?.aiModel || undefined
       );
 
+      // 获取用户的学科和知识点列表，用于AI识别匹配
+      const userSubjects = await db
+        .select()
+        .from(subjects)
+        .where(eq(subjects.userId, ctx.user.id));
+
+      const userNodes = await db
+        .select()
+        .from(knowledgeNodes)
+        .where(eq(knowledgeNodes.userId, ctx.user.id));
+
       const savedQuestions = [];
       for (const q of result.questions) {
+        // 尝试根据AI识别的学科和知识点匹配本地数据
+        let matchedSubjectId = input.subjectId;
+        let matchedNodeId = input.nodeId;
+
+        if (!matchedSubjectId && q.detectedSubject) {
+          const matchedSubject = userSubjects.find(
+            s => s.title.toLowerCase().includes(q.detectedSubject!.toLowerCase()) ||
+                 q.detectedSubject!.toLowerCase().includes(s.title.toLowerCase())
+          );
+          if (matchedSubject) {
+            matchedSubjectId = matchedSubject.id;
+          }
+        }
+
+        if (!matchedNodeId && q.detectedKnowledgePoint) {
+          const matchedNode = userNodes.find(
+            n => n.title.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
+                 q.detectedKnowledgePoint!.toLowerCase().includes(n.title.toLowerCase())
+          );
+          if (matchedNode) {
+            matchedNodeId = matchedNode.id;
+            if (!matchedSubjectId) {
+              matchedSubjectId = matchedNode.subjectId;
+            }
+          }
+        }
+
         const [{ id }] = await db
           .insert(questions)
           .values({
             userId: ctx.user.id,
-            subjectId: input.subjectId,
-            nodeId: input.nodeId,
+            subjectId: matchedSubjectId,
+            nodeId: matchedNodeId,
             skillId: input.skillId,
             questionType: input.questionType,
             content: q.content,
@@ -217,10 +338,12 @@ export const questionRouter = createRouter({
             difficulty: q.difficulty,
             imageUrl: q.imageUrl || null,
             aiGenerated: true,
+            detectedSubject: q.detectedSubject || null,
+            detectedKnowledgePoint: q.detectedKnowledgePoint || null,
           })
           .$returningId();
 
-        savedQuestions.push({ id, ...q });
+        savedQuestions.push({ id, ...q, subjectId: matchedSubjectId, nodeId: matchedNodeId });
       }
 
       return { success: true, questions: savedQuestions };

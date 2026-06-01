@@ -298,6 +298,9 @@ export const questions = mysqlTable("questions", {
   difficulty: int("difficulty").default(3).notNull(), // 难度 1-5
   imageUrl: text("imageUrl"), // 题目图片URL
   aiGenerated: boolean("aiGenerated").default(true).notNull(),
+  // AI识别的学科和知识点（用于匹配本地数据）
+  detectedSubject: varchar("detectedSubject", { length: 255 }), // AI识别的学科名称
+  detectedKnowledgePoint: varchar("detectedKnowledgePoint", { length: 255 }), // AI识别的知识点名称
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

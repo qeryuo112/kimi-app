@@ -71,6 +71,14 @@ export default function Questions() {
 
   const { data: settings } = trpc.settings.get.useQuery();
 
+  // 获取学科和知识点列表，用于显示关联信息
+  const { data: subjects } = trpc.subject.list.useQuery();
+  const { data: knowledgeNodes } = trpc.knowledgeNode.list.useQuery();
+
+  // 创建映射表，方便查找
+  const subjectMap = new Map((subjects || []).map((s: any) => [s.id, s]));
+  const nodeMap = new Map((knowledgeNodes || []).map((n: any) => [n.id, n]));
+
   // AI从文件出题
   const aiGenerateFromUrls = trpc.question.aiGenerateFromUrls.useMutation({
     onSuccess: (data) => {
@@ -501,6 +509,23 @@ export default function Questions() {
               <div className="text-xs text-muted-foreground mb-1">【图片】{q.imageUrl}</div>
               {(q.imageUrl.startsWith("http") || q.imageUrl.startsWith("/uploads/")) && (
                 <img src={q.imageUrl} alt="题目图片" className="max-h-[200px] mx-auto rounded" />
+              )}
+            </div>
+          )}
+          {/* 学科和知识点标签 */}
+          {(q.detectedSubject || q.detectedKnowledgePoint || q.subjectId || q.nodeId) && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {(q.detectedSubject || q.subjectId) && (
+                <Badge variant="secondary" className="text-xs bg-blue-500/20 text-blue-400 border-blue-500/30">
+                  <BookOpen className="h-3 w-3 mr-1" />
+                  {subjectMap.get(q.subjectId)?.title || q.detectedSubject || "未分类学科"}
+                </Badge>
+              )}
+              {(q.detectedKnowledgePoint || q.nodeId) && (
+                <Badge variant="secondary" className="text-xs bg-purple-500/20 text-purple-400 border-purple-500/30">
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  {nodeMap.get(q.nodeId)?.title || q.detectedKnowledgePoint || "未分类知识点"}
+                </Badge>
               )}
             </div>
           )}
@@ -1028,9 +1053,21 @@ export default function Questions() {
                 {recognizedQuestions.map((q, idx) => (
                   <Card key={idx} className="border-border/50">
                     <CardContent className="pt-4">
-                      <div className="flex gap-2 mb-2">
+                      <div className="flex gap-2 mb-2 flex-wrap">
                         <Badge variant="outline">{questionTypeMap[q.questionType] || q.questionType}</Badge>
                         <Badge className={difficultyMap[q.difficulty]?.color || ""}>{difficultyMap[q.difficulty]?.label || `难度${q.difficulty}`}</Badge>
+                        {(q.detectedSubject || q.subjectId) && (
+                          <Badge variant="secondary" className="text-xs bg-blue-500/20 text-blue-400 border-blue-500/30">
+                            <BookOpen className="h-3 w-3 mr-1" />
+                            {subjectMap.get(q.subjectId)?.title || q.detectedSubject || "未知学科"}
+                          </Badge>
+                        )}
+                        {(q.detectedKnowledgePoint || q.nodeId) && (
+                          <Badge variant="secondary" className="text-xs bg-purple-500/20 text-purple-400 border-purple-500/30">
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            {nodeMap.get(q.nodeId)?.title || q.detectedKnowledgePoint || "未知知识点"}
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-sm font-medium mb-2">{q.content}</p>
                       {q.options && (

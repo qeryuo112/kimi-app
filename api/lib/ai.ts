@@ -637,6 +637,8 @@ export async function generateQuestionsFromFileUrls(
     explanation: string;
     difficulty: number;
     imageUrl?: string;
+    detectedSubject?: string;
+    detectedKnowledgePoint?: string;
   }>;
 }> {
   const typeDesc = questionType === "mixed"
@@ -660,6 +662,7 @@ export async function generateQuestionsFromFileUrls(
 4. 提供详细的答案解析
 5. 每道题标注难度(1-5)
 6. mixed模式下，必须混合至少2种不同题型
+7. **分析文件内容所属的学科，以及每道题目考察的具体知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**
 
 请返回JSON格式：
 {
@@ -669,7 +672,9 @@ export async function generateQuestionsFromFileUrls(
       "options": [{"label": "A", "text": "选项A"}, {"label": "B", "text": "选项B"}, {"label": "C", "text": "选项C"}, {"label": "D", "text": "选项D"}],
       "correctAnswer": "A",
       "explanation": "解析",
-      "difficulty": 3
+      "difficulty": 3,
+      "detectedSubject": "识别的学科名称，如'数学'、'物理'、'编程'等",
+      "detectedKnowledgePoint": "识别的具体知识点，如'二次函数'、'牛顿定律'等"
     }
   ]
 }`;
@@ -726,6 +731,8 @@ export async function generateQuestions(
     explanation: string;
     difficulty: number;
     imageUrl?: string;
+    detectedSubject?: string;
+    detectedKnowledgePoint?: string;
   }>;
 }> {
   const typeDesc = questionType === "mixed"
@@ -749,6 +756,7 @@ export async function generateQuestions(
 4. 每道题标注难度(1-5)
 5. 如果题目适合配合图片（如观察图形、图表、示意图等），可以添加imageUrl字段，值为图片描述文字（如"细胞结构示意图"、"二次函数图像"等）
 6. mixed模式下，必须混合至少2种不同题型
+7. **分析题目所属学科和具体考察的知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**
 
 请返回JSON格式：
 {
@@ -759,7 +767,9 @@ export async function generateQuestions(
       "correctAnswer": "A",
       "explanation": "解析",
       "difficulty": 3,
-      "imageUrl": "可选：图片描述文字"
+      "imageUrl": "可选：图片描述文字",
+      "detectedSubject": "识别的学科名称，如'数学'、'物理'、'编程'等",
+      "detectedKnowledgePoint": "识别的具体知识点，如'二次函数'、'牛顿定律'、'React Hooks'等"
     }
   ]
 }`;
@@ -1252,6 +1262,8 @@ export async function recognizeQuestionsFromUrls(
     explanation: string;
     difficulty: number;
     imageUrl?: string;
+    detectedSubject?: string;
+    detectedKnowledgePoint?: string;
   }>;
 }> {
   const typeDesc =
@@ -1278,6 +1290,7 @@ export async function recognizeQuestionsFromUrls(
 6. mixed模式下，必须混合至少2种不同题型
 7. **数量由文档中实际包含的题目数量决定，请识别出所有能看清的题目**
 8. 如果文档中某道题不完整或看不清，请跳过该题
+9. **分析题目所属的学科和考察的具体知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**
 
 请返回JSON格式：
 {
@@ -1287,7 +1300,9 @@ export async function recognizeQuestionsFromUrls(
       "options": [{"label": "A", "text": "选项A"}, {"label": "B", "text": "选项B"}, {"label": "C", "text": "选项C"}, {"label": "D", "text": "选项D"}],
       "correctAnswer": "A",
       "explanation": "解析",
-      "difficulty": 3
+      "difficulty": 3,
+      "detectedSubject": "识别的学科名称，如'数学'、'物理'等",
+      "detectedKnowledgePoint": "识别的具体知识点，如'二次函数'等"
     }
   ]
 }`;
