@@ -162,24 +162,31 @@ export default function Questions() {
   const [editingQuestion, setEditingQuestion] = useState<any>(null);
   const [editForm, setEditForm] = useState({
     content: "",
-    options: "",
     correctAnswer: "",
     explanation: "",
     difficulty: 3,
     imageUrl: "",
   });
+  const [editOptions, setEditOptions] = useState<Array<{ label: string; text: string }>>([]);
+  const [isEditImageUploading, setIsEditImageUploading] = useState(false);
   const [showAnswerMap, setShowAnswerMap] = useState<Record<number, boolean>>({});
 
   const startEdit = (q: any) => {
     setEditingQuestion(q);
     setEditForm({
       content: q.content,
-      options: q.options || "",
       correctAnswer: q.correctAnswer,
       explanation: q.explanation || "",
       difficulty: q.difficulty,
       imageUrl: q.imageUrl || "",
     });
+    // 解析选项
+    try {
+      const opts = q.options ? JSON.parse(q.options) : [];
+      setEditOptions(Array.isArray(opts) ? opts : []);
+    } catch {
+      setEditOptions([]);
+    }
   };
 
   const handleUpdate = () => {
@@ -187,12 +194,64 @@ export default function Questions() {
     updateQuestion.mutate({
       id: editingQuestion.id,
       content: editForm.content,
-      options: editForm.options,
+      options: JSON.stringify(editOptions),
       correctAnswer: editForm.correctAnswer,
       explanation: editForm.explanation,
       difficulty: editForm.difficulty,
       imageUrl: editForm.imageUrl || null,
     });
+  };
+
+  const handleEditImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fileServerUrl = settings?.fileServerUrl?.trim();
+    if (!fileServerUrl) {
+      toast.error("请先在设置中配置文件上传服务器地址");
+      return;
+    }
+
+    setIsEditImageUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(`上传失败: ${err.error || res.statusText}`);
+        return;
+      }
+      const data = await res.json();
+      if (data.url) {
+        setEditForm((prev) => ({ ...prev, imageUrl: data.url }));
+        toast.success("图片上传成功");
+      }
+    } catch (err: any) {
+      toast.error(`上传失败: ${err.message}`);
+    } finally {
+      setIsEditImageUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  const addOption = () => {
+    const labels = ["A", "B", "C", "D", "E", "F"];
+    const nextLabel = labels[editOptions.length] || String(editOptions.length + 1);
+    setEditOptions([...editOptions, { label: nextLabel, text: "" }]);
+  };
+
+  const removeOption = (index: number) => {
+    setEditOptions(editOptions.filter((_, i) => i !== index));
+  };
+
+  const updateOption = (index: number, text: string) => {
+    const newOptions = [...editOptions];
+    newOptions[index].text = text;
+    setEditOptions(newOptions);
   };
 
   const toggleAnswer = (id: number) => {
@@ -533,13 +592,41 @@ export default function Questions() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium">选项（JSON格式）</label>
-              <Textarea
-                value={editForm.options}
-                onChange={(e) => setEditForm({ ...editForm, options: e.target.value })}
-                placeholder='[{"label":"A","text":"选项A"},...]'
-                className="min-h-[80px]"
-              />
+              <label className="text-sm font-medium">选项</label>
+              <div className="space-y-2">
+                {editOptions.map((opt, index) => (
+                  <div key={opt.label} className="flex items-center gap-2">
+                    <span className="font-medium text-primary w-6">{opt.label}.</span>
+                    <Input
+                      value={opt.text}
+                      onChange={(e) => updateOption(index, e.target.value)}
+                      placeholder={`选项 ${opt.label}`}
+                      className="flex-1"
+                    />
+                    {editOptions.length > 2 && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => removeOption(index)}
+                        className="h-8 w-8 p-0 text-red-400 hover:text-red-500"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {editOptions.length < 6 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={addOption}
+                  className="mt-2"
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  添加选项
+                </Button>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium">正确答案</label>
@@ -557,12 +644,27 @@ export default function Questions() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium">图片URL</label>
-              <Input
-                value={editForm.imageUrl}
-                onChange={(e) => setEditForm({ ...editForm, imageUrl: e.target.value })}
-                placeholder="http://..."
-              />
+              <label className="text-sm font-medium">题目图片</label>
+              <div className="space-y-2">
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleEditImageUpload}
+                  disabled={isEditImageUploading}
+                />
+                {isEditImageUploading && (
+                  <p className="text-xs text-muted-foreground">上传中...</p>
+                )}
+                {editForm.imageUrl && (
+                  <div className="mt-2">
+                    <img
+                      src={editForm.imageUrl}
+                      alt="题目图片"
+                      className="max-h-[150px] rounded border"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <label className="text-sm font-medium">难度</label>
