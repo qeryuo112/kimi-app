@@ -1097,6 +1097,7 @@ export async function generateTodoTestQuestions(
     correctAnswer: string;
     explanation: string;
     knowledgePoint: string;
+    questionType?: string;
   }>;
 }> {
   const typeDesc = questionType === "mixed"
@@ -1276,6 +1277,7 @@ export async function generateTodoTestFromFiles(
     correctAnswer: string;
     explanation: string;
     knowledgePoint: string;
+    questionType?: string;
   }>;
 }> {
   const typeDesc = questionType === "mixed"

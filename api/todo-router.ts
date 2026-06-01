@@ -316,6 +316,7 @@ export const todoRouter = createRouter({
             correctAnswer: q.correctAnswer,
             explanation: q.explanation || "",
             knowledgePoint: q.detectedKnowledgePoint || nodeMap.get(q.nodeId)?.title || "综合",
+            questionType: q.questionType,
           })),
           source: "database",
         };
@@ -332,7 +333,29 @@ export const todoRouter = createRouter({
         setting?.aiModel || undefined
       );
 
-      return { ...result, source: "ai" };
+      // 将AI生成的题目保存到题库
+      const savedQuestionIds: number[] = [];
+      for (const q of result.questions) {
+        const [{ id }] = await db
+          .insert(questions)
+          .values({
+            userId: ctx.user.id,
+            subjectId: todo.subjectId,
+            questionType: q.questionType || input.questionType,
+            content: q.content,
+            options: q.options ? JSON.stringify(q.options) : null,
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation,
+            difficulty: 3,
+            aiGenerated: true,
+            detectedSubject: todo.subject,
+            detectedKnowledgePoint: q.knowledgePoint,
+          })
+          .$returningId();
+        savedQuestionIds.push(id);
+      }
+
+      return { ...result, source: "ai", savedQuestionIds };
     }),
 
   // 从文件生成测试题
@@ -379,7 +402,29 @@ export const todoRouter = createRouter({
         setting?.aiModel || undefined
       );
 
-      return { ...result, source: "ai" };
+      // 将AI生成的题目保存到题库
+      const savedQuestionIds: number[] = [];
+      for (const q of result.questions) {
+        const [{ id }] = await db
+          .insert(questions)
+          .values({
+            userId: ctx.user.id,
+            subjectId: todo.subjectId,
+            questionType: q.questionType || input.questionType,
+            content: q.content,
+            options: q.options ? JSON.stringify(q.options) : null,
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation,
+            difficulty: 3,
+            aiGenerated: true,
+            detectedSubject: todo.subject,
+            detectedKnowledgePoint: q.knowledgePoint,
+          })
+          .$returningId();
+        savedQuestionIds.push(id);
+      }
+
+      return { ...result, source: "ai", savedQuestionIds };
     }),
 
   // 提交测试答案 + AI评估（完成todo，自动创建学习记录并更新掌握度）
@@ -395,6 +440,7 @@ export const todoRouter = createRouter({
             correctAnswer: z.string(),
             explanation: z.string(),
             knowledgePoint: z.string(),
+            questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).optional(),
           })
         ),
         answers: z.array(
@@ -429,19 +475,80 @@ export const todoRouter = createRouter({
         }
       })();
 
-      // AI考官评估答题
-      const evaluation = await evaluateTodoTestAnswers(
-        todo.subject,
-        nodes,
-        input.questions,
-        input.answers,
-        setting?.aiApiKey || undefined,
-        setting?.aiApiEndpoint || undefined,
-        setting?.aiModel || undefined
+      // 区分选择题和非选择题
+      const choiceQuestions = input.questions.filter(q =>
+        q.questionType === "single_choice" || q.questionType === "multiple_choice"
+      );
+      const otherQuestions = input.questions.filter(q =>
+        q.questionType !== "single_choice" && q.questionType !== "multiple_choice"
       );
 
-      const mastery = evaluation.mastery;
-      const feedback = `答对 ${evaluation.correctCount}/${evaluation.totalCount} 题。${evaluation.feedback}`;
+      // 选择题本地判断
+      let correctCount = 0;
+      const choiceAnswers: Array<{ questionId: string; userAnswer: string }> = [];
+
+      for (const q of choiceQuestions) {
+        const ans = input.answers.find(a => a.questionId === q.id);
+        if (ans) {
+          choiceAnswers.push(ans);
+          // 本地判断：去除空格后对比
+          const userAns = ans.userAnswer.trim().toUpperCase();
+          const correctAns = q.correctAnswer.trim().toUpperCase();
+          if (userAns === correctAns) {
+            correctCount++;
+          }
+        }
+      }
+
+      // 非选择题需要AI评估
+      let aiEvaluation: any = null;
+      if (otherQuestions.length > 0) {
+        const otherAnswers = input.answers.filter(a =>
+          otherQuestions.some(q => q.id === a.questionId)
+        );
+        aiEvaluation = await evaluateTodoTestAnswers(
+          todo.subject,
+          nodes,
+          otherQuestions,
+          otherAnswers,
+          setting?.aiApiKey || undefined,
+          setting?.aiApiEndpoint || undefined,
+          setting?.aiModel || undefined
+        );
+      }
+
+      // 计算总掌握度
+      const totalQuestions = input.questions.length;
+      let mastery = 0;
+      let feedback = "";
+
+      if (choiceQuestions.length > 0 && otherQuestions.length === 0) {
+        // 全是选择题
+        mastery = Math.round((correctCount / totalQuestions) * 100);
+        feedback = `答对 ${correctCount}/${totalQuestions} 题，掌握度 ${mastery}%`;
+      } else if (choiceQuestions.length === 0 && otherQuestions.length > 0) {
+        // 全是非选择题，使用AI评估
+        mastery = aiEvaluation?.mastery || 0;
+        feedback = `AI评估掌握度 ${mastery}%`;
+      } else {
+        // 混合题型：选择题本地 + 非选择题AI
+        const choiceWeight = choiceQuestions.length / totalQuestions;
+        const otherWeight = otherQuestions.length / totalQuestions;
+        const choiceMastery = Math.round((correctCount / choiceQuestions.length) * 100);
+        const otherMastery = aiEvaluation?.mastery || 0;
+        mastery = Math.round(choiceMastery * choiceWeight + otherMastery * otherWeight);
+        feedback = `选择题 ${correctCount}/${choiceQuestions.length} 正确，AI评估主观题掌握度 ${otherMastery}%，综合掌握度 ${mastery}%`;
+      }
+
+      // 构建评估结果
+      const evaluation = {
+        mastery,
+        correctCount: correctCount + (aiEvaluation?.correctCount || 0),
+        totalCount: totalQuestions,
+        feedback,
+        suggestions: aiEvaluation?.suggestions || [],
+        weakPoints: aiEvaluation?.weakPoints || [],
+      };
 
       // ========== 在执行更新前，收集所有需要恢复的快照数据 ==========
       const snapshot: any = {

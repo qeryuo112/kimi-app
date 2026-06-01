@@ -38,6 +38,7 @@ interface TestQuestion {
   correctAnswer: string;
   explanation: string;
   knowledgePoint: string;
+  questionType?: "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed";
 }
 
 export default function Todos() {
@@ -266,6 +267,7 @@ export default function Todos() {
         correctAnswer: q.correctAnswer,
         explanation: q.explanation,
         knowledgePoint: q.knowledgePoint,
+        questionType: q.questionType || "single_choice",
       })),
       answers: testQuestions.map((q) => ({
         questionId: q.id,
