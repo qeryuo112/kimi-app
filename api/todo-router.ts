@@ -1041,11 +1041,40 @@ export const todoRouter = createRouter({
 
       // 将AI生成的题目保存到题库
       const savedQuestionIds: number[] = [];
+
+      // 查找对应的 subjectId
+      const subjectMatch = await db
+        .select()
+        .from(subjects)
+        .where(
+          and(
+            eq(subjects.userId, ctx.user.id),
+            eq(subjects.title, review.subjectTitle)
+          )
+        )
+        .limit(1);
+      const subjectId = subjectMatch.length > 0 ? subjectMatch[0].id : null;
+
+      // 查找对应的 nodeId
+      const nodeMatch = await db
+        .select()
+        .from(knowledgeNodes)
+        .where(
+          and(
+            eq(knowledgeNodes.userId, ctx.user.id),
+            eq(knowledgeNodes.title, review.nodeTitle)
+          )
+        )
+        .limit(1);
+      const nodeId = nodeMatch.length > 0 ? nodeMatch[0].id : null;
+
       for (const q of result.questions) {
         const [{ id }] = await db
           .insert(questions)
           .values({
             userId: ctx.user.id,
+            subjectId: subjectId,
+            nodeId: nodeId,
             questionType: (q.questionType || input.questionType) as "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed",
             content: q.content,
             options: q.options ? JSON.stringify(q.options) : null,
