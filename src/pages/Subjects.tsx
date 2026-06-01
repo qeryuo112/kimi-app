@@ -146,12 +146,8 @@ export default function Subjects() {
       return;
     }
 
-    const fileServerUrl = settings?.fileServerUrl?.trim();
+    const fileServerUrl = settings?.fileServerUrl?.trim() || window.location.origin;
     console.log("[DEBUG] fileServerUrl:", fileServerUrl);
-    if (!fileServerUrl) {
-      toast.error("请先在设置中配置文件上传服务器地址");
-      return;
-    }
 
     setIsUploading(true);
     const newFiles: Array<{ url: string; name: string }> = [];
