@@ -345,11 +345,13 @@ export const examPapers = mysqlTable("exam_papers", {
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
   questionIds: text("questionIds").notNull(), // JSON 数组，存储题目ID列表
+  questionScores: text("questionScores"), // JSON 对象，存储每道题的分数 {questionId: score}
   subjectId: bigint("subjectId", { mode: "number", unsigned: true }),
   knowledgeNodeIds: text("knowledgeNodeIds"), // JSON 数组，关联知识点
   totalQuestions: int("totalQuestions").default(0).notNull(),
   totalScore: int("totalScore").default(100).notNull(),
   timeLimit: int("timeLimit"), // 考试时限（分钟）
+  aiAnalysis: text("aiAnalysis"), // AI 分析结果：难度分布、知识点覆盖范围等
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

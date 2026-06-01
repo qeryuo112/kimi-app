@@ -1491,4 +1491,145 @@ ${contextData ? JSON.stringify(contextData, null, 2) : "暂无上下文数据"}
   return result;
 }
 
+// 分析试卷的综合难度和知识点考察范围
+export async function analyzePaperDifficulty(
+  paperTitle: string,
+  questions: Array<{
+    id: number;
+    content: string;
+    type: string;
+    difficulty: number;
+    subjectTitle?: string;
+    nodeTitle?: string;
+  }>,
+  localSubjects?: Array<{
+    id: number;
+    title: string;
+    description?: string;
+  }>,
+  localNodes?: Array<{
+    id: number;
+    title: string;
+    subjectId: number;
+    subjectTitle?: string;
+  }>,
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  overallDifficulty: number; // 1-5
+  difficultyDistribution: {
+    easy: number; // 百分比
+    medium: number;
+    hard: number;
+  };
+  // 试卷关联的本地学科（从用户本地学科列表中匹配）
+  matchedSubjects: Array<{
+    id: number;
+    title: string;
+    relevanceScore: number; // 关联度 0-100
+    questionCount: number; // 该学科关联的题目数量
+  }>;
+  // 试卷考察的本地知识点（从用户本地知识树中匹配）
+  matchedNodes: Array<{
+    id: number;
+    title: string;
+    subjectId: number;
+    subjectTitle: string;
+    questionCount: number;
+  }>;
+  // 试卷还考察了哪些不在本地知识树中的知识点
+  otherKnowledgePoints: string[];
+}> {
+  const systemPrompt = `你是一个专业的教育评估AI。请分析试卷的题目内容，评估难度，并将试卷内容与用户本地的学科知识树进行智能匹配。
 
+分析要求：
+1. 计算试卷整体难度（1-5），基于各题难度的加权平均
+2. 分析难度分布：简单/中等/困难题目的比例
+3. 将试卷内容与本地学科列表进行匹配：
+   - 根据题目内容判断试卷主要属于哪个/哪些学科
+   - 从提供的本地学科列表中选择最相关的学科
+   - 给出关联度评分（0-100）
+4. 将试卷内容与本地知识树节点进行匹配：
+   - 识别试卷考察了哪些知识点
+   - 从提供的本地知识节点列表中匹配最相关的节点
+   - 统计每个知识点对应的题目数量
+5. 识别试卷还涉及了哪些不在本地知识树中的知识点
+
+请严格按照JSON格式返回：
+{
+  "overallDifficulty": 3.5,
+  "difficultyDistribution": {
+    "easy": 30,
+    "medium": 50,
+    "hard": 20
+  },
+  "matchedSubjects": [
+    {
+      "id": 1,
+      "title": "匹配的本地学科名称",
+      "relevanceScore": 85,
+      "questionCount": 8
+    }
+  ],
+  "matchedNodes": [
+    {
+      "id": 10,
+      "title": "匹配的本地知识点名称",
+      "subjectId": 1,
+      "subjectTitle": "所属学科",
+      "questionCount": 3
+    }
+  ],
+  "otherKnowledgePoints": ["未匹配到的知识点1", "未匹配到的知识点2"]
+}`;
+
+  const questionsInfo = questions.map((q) => ({
+    content: q.content.slice(0, 200),
+    type: q.type,
+    difficulty: q.difficulty,
+    subject: q.subjectTitle,
+    node: q.nodeTitle,
+  }));
+
+  const userPrompt = `请分析以下试卷，并与本地学科知识树进行匹配：
+
+试卷标题：${paperTitle}
+题目数量：${questions.length}
+
+题目列表：
+${JSON.stringify(questionsInfo, null, 2)}
+
+用户本地学科列表：
+${localSubjects ? JSON.stringify(localSubjects.map(s => ({ id: s.id, title: s.title })), null, 2) : "未提供"}
+
+用户本地知识树节点：
+${localNodes ? JSON.stringify(localNodes.map(n => ({ id: n.id, title: n.title, subjectId: n.subjectId, subjectTitle: n.subjectTitle })), null, 2) : "未提供"}
+
+请分析该试卷的难度分布，并从本地学科和知识节点中匹配最相关的内容。注意：matchedSubjects 和 matchedNodes 必须从提供的本地列表中选择。`;
+
+  const result = await chatWithAI(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    0.5,
+    apiKey,
+    apiUrl,
+    modelName,
+    true
+  );
+
+  try {
+    const parsed = JSON.parse(result);
+    return {
+      overallDifficulty: parsed.overallDifficulty || 3,
+      difficultyDistribution: parsed.difficultyDistribution || { easy: 33, medium: 34, hard: 33 },
+      matchedSubjects: parsed.matchedSubjects || [],
+      matchedNodes: parsed.matchedNodes || [],
+      otherKnowledgePoints: parsed.otherKnowledgePoints || [],
+    };
+  } catch {
+    throw new Error("AI返回的试卷分析数据格式不正确");
+  }
+}

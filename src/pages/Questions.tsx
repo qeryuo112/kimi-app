@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/providers/trpc";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ import {
   FileText,
   FolderOpen,
   Clock,
+  Eye,
+  BrainCircuit,
 } from "lucide-react";
 
 export default function Questions() {
@@ -79,19 +81,27 @@ export default function Questions() {
     timeLimit: 60,
   });
   const [selectedPaperQuestions, setSelectedPaperQuestions] = useState<Set<number>>(new Set());
+  const [questionScores, setQuestionScores] = useState<Record<number, number>>({}); // 每道题的自定义分数
+
+  // 试卷详情查看状态
+  const [viewingPaper, setViewingPaper] = useState<any>(null);
+  const [paperDetailData, setPaperDetailData] = useState<any>(null);
+
+  // AI 分析状态
+  const [analyzingPaperId, setAnalyzingPaperId] = useState<number | null>(null);
 
   const { data: settings } = trpc.settings.get.useQuery();
 
   // 获取学科和知识点列表，用于显示关联信息
   const { data: subjects } = trpc.subject.list.useQuery();
-  const { data: knowledgeNodes } = trpc.knowledgeNode.list.useQuery();
+  const { data: knowledgeNodes } = trpc.knowledge.list.useQuery();
 
   // 获取试卷列表
   const { data: examPapers } = trpc.exam.list.useQuery();
 
   // 创建映射表，方便查找
-  const subjectMap = new Map((subjects || []).map((s: any) => [s.id, s]));
-  const nodeMap = new Map((knowledgeNodes || []).map((n: any) => [n.id, n]));
+  const subjectMap = new Map<number, { id: number; title: string }>((subjects || []).map((s: { id: number; title: string }) => [s.id, s]));
+  const nodeMap = new Map<number, { id: number; title: string }>((knowledgeNodes || []).map((n: { id: number; title: string }) => [n.id, n]));
 
   // AI从文件出题
   const aiGenerateFromUrls = trpc.question.aiGenerateFromUrls.useMutation({
@@ -189,6 +199,39 @@ export default function Questions() {
       toast.success("试卷已删除");
     },
   });
+
+  // AI 分析试卷
+  const analyzePaper = trpc.exam.analyze.useMutation({
+    onSuccess: (data) => {
+      toast.success("试卷分析完成");
+      utils.exam.list.invalidate();
+      setAnalyzingPaperId(null);
+      // 如果正在查看该试卷，更新详情
+      if (viewingPaper && data.analysis) {
+        setPaperDetailData((prev: any) => ({
+          ...prev,
+          paper: { ...prev?.paper, aiAnalysis: JSON.stringify(data.analysis) },
+        }));
+      }
+    },
+    onError: (err) => {
+      toast.error(err.message || "分析失败");
+      setAnalyzingPaperId(null);
+    },
+  });
+
+  // 试卷详情查询
+  const paperDetailQuery = trpc.exam.getById.useQuery(
+    { id: viewingPaper?.id || 0 },
+    { enabled: !!viewingPaper?.id }
+  );
+
+  // 当查询数据返回时更新 paperDetailData
+  useEffect(() => {
+    if (paperDetailQuery.data) {
+      setPaperDetailData(paperDetailQuery.data);
+    }
+  }, [paperDetailQuery.data]);
 
   // 更新题目
   const updateQuestion = trpc.question.update.useMutation({
@@ -848,12 +891,43 @@ export default function Questions() {
                             </Badge>
                           </div>
                         </div>
+                        {selectedPaperQuestions.has(q.id) && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground">分数</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={questionScores[q.id] || 10}
+                              onChange={(e) => {
+                                const score = parseInt(e.target.value) || 10;
+                                setQuestionScores({ ...questionScores, [q.id]: score });
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-16 h-7 text-sm"
+                            />
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 )}
               </div>
             </div>
+
+            {/* 显示已选题目总分预览 */}
+            {selectedPaperQuestions.size > 0 && (
+              <div className="bg-secondary/30 p-3 rounded-lg">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-muted-foreground">已选 {selectedPaperQuestions.size} 题</span>
+                  <span className="font-medium">
+                    预计总分：{
+                      Array.from(selectedPaperQuestions).reduce((sum, id) => sum + (questionScores[id] || 10), 0)
+                    } 分
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div className="flex gap-2">
               <Button
@@ -866,10 +940,16 @@ export default function Questions() {
                     toast.error("请至少选择一道题目");
                     return;
                   }
+                  // 构建分数对象
+                  const scores: Record<number, number> = {};
+                  selectedPaperQuestions.forEach((id) => {
+                    scores[id] = questionScores[id] || 10;
+                  });
                   createPaper.mutate({
                     title: paperForm.title,
                     description: paperForm.description,
                     questionIds: Array.from(selectedPaperQuestions),
+                    questionScores: scores,
                     timeLimit: paperForm.timeLimit,
                   });
                 }}
@@ -879,7 +959,10 @@ export default function Questions() {
                 {createPaper.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                 创建试卷
               </Button>
-              <Button variant="outline" onClick={() => setShowCreatePaper(false)} className="flex-1">
+              <Button variant="outline" onClick={() => {
+                setShowCreatePaper(false);
+                setQuestionScores({});
+              }} className="flex-1">
                 取消
               </Button>
             </div>
@@ -1605,18 +1688,30 @@ export default function Questions() {
                             <p className="text-sm text-muted-foreground mt-0.5">{paper.description}</p>
                           )}
                         </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-8 w-8 p-0"
-                          onClick={() => {
-                            if (confirm("确定要删除这份试卷吗？")) {
-                              deletePaper.mutate({ id: paper.id });
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-primary hover:text-primary hover:bg-primary/10 h-8 w-8 p-0"
+                            onClick={() => {
+                              setViewingPaper(paper);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-8 w-8 p-0"
+                            onClick={() => {
+                              if (confirm("确定要删除这份试卷吗？")) {
+                                deletePaper.mutate({ id: paper.id });
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-2 mt-3">
                         <Badge variant="outline" className="text-xs">
@@ -1631,6 +1726,31 @@ export default function Questions() {
                             {paper.timeLimit} 分钟
                           </Badge>
                         )}
+                        {paper.aiAnalysis && (
+                          <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                            <BrainCircuit className="h-3 w-3" />
+                            已分析
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs flex-1"
+                          onClick={() => {
+                            setAnalyzingPaperId(paper.id);
+                            analyzePaper.mutate({ id: paper.id });
+                          }}
+                          disabled={analyzingPaperId === paper.id || analyzePaper.isPending}
+                        >
+                          {analyzingPaperId === paper.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                          ) : (
+                            <BrainCircuit className="h-3 w-3 mr-1" />
+                          )}
+                          {paper.aiAnalysis ? "重新分析" : "AI 分析"}
+                        </Button>
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
                         创建于 {new Date(paper.createdAt).toLocaleDateString("zh-CN")}
@@ -1643,6 +1763,208 @@ export default function Questions() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* 试卷详情对话框 */}
+      {viewingPaper && (
+        <Card className="fixed inset-4 z-50 max-h-[90vh] overflow-auto">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Eye className="h-4 w-4 text-primary" />
+              试卷详情
+            </CardTitle>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 p-0"
+              onClick={() => {
+                setViewingPaper(null);
+                setPaperDetailData(null);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* 试卷基本信息 */}
+            <div className="bg-secondary/30 p-4 rounded-lg">
+              <h3 className="font-medium text-lg">{viewingPaper.title}</h3>
+              {viewingPaper.description && (
+                <p className="text-sm text-muted-foreground mt-1">{viewingPaper.description}</p>
+              )}
+              <div className="flex flex-wrap gap-2 mt-3">
+                <Badge variant="outline">{viewingPaper.totalQuestions} 题</Badge>
+                <Badge variant="outline">总分 {viewingPaper.totalScore}</Badge>
+                {viewingPaper.timeLimit && (
+                  <Badge variant="outline" className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {viewingPaper.timeLimit} 分钟
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            {/* AI 分析结果 */}
+            {viewingPaper.aiAnalysis && (
+              <div className="border rounded-lg p-4">
+                <h4 className="font-medium flex items-center gap-2 mb-3">
+                  <BrainCircuit className="h-4 w-4 text-primary" />
+                  AI 分析报告
+                </h4>
+                {(() => {
+                  try {
+                    const analysis = JSON.parse(viewingPaper.aiAnalysis);
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-4">
+                          <div>
+                            <span className="text-sm text-muted-foreground">综合难度</span>
+                            <div className="font-medium">{analysis.overallDifficulty}/5</div>
+                          </div>
+                          <div className="flex-1">
+                            <span className="text-sm text-muted-foreground">难度分布</span>
+                            <div className="flex gap-2 mt-1">
+                              <Badge variant="outline" className="text-xs bg-green-500/10">
+                                简单 {analysis.difficultyDistribution?.easy || 0}%
+                              </Badge>
+                              <Badge variant="outline" className="text-xs bg-yellow-500/10">
+                                中等 {analysis.difficultyDistribution?.medium || 0}%
+                              </Badge>
+                              <Badge variant="outline" className="text-xs bg-red-500/10">
+                                困难 {analysis.difficultyDistribution?.hard || 0}%
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                        {/* 关联的本地学科 - 类似题目卡片的样式 */}
+                        {analysis.matchedSubjects && analysis.matchedSubjects.length > 0 && (
+                          <div>
+                            <span className="text-sm text-muted-foreground">关联学科</span>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {analysis.matchedSubjects.map((sub: any, idx: number) => (
+                                <Badge key={idx} variant="secondary" className="text-xs bg-blue-500/20 text-blue-400 border-blue-500/30">
+                                  <BookOpen className="h-3 w-3 mr-1" />
+                                  {sub.title}
+                                  {sub.relevanceScore && (
+                                    <span className="ml-1 opacity-75">({sub.relevanceScore}%)</span>
+                                  )}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {/* 关联的本地知识点 - 类似题目卡片的样式 */}
+                        {analysis.matchedNodes && analysis.matchedNodes.length > 0 && (
+                          <div>
+                            <span className="text-sm text-muted-foreground">考察知识点</span>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {analysis.matchedNodes.map((node: any, idx: number) => (
+                                <Badge key={idx} variant="secondary" className="text-xs bg-purple-500/20 text-purple-400 border-purple-500/30">
+                                  <Sparkles className="h-3 w-3 mr-1" />
+                                  {node.title}
+                                  {node.questionCount > 1 && (
+                                    <span className="ml-1 opacity-75">({node.questionCount}题)</span>
+                                  )}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {/* 其他未匹配到的知识点 */}
+                        {analysis.otherKnowledgePoints && analysis.otherKnowledgePoints.length > 0 && (
+                          <div>
+                            <span className="text-sm text-muted-foreground">其他涉及内容</span>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {analysis.otherKnowledgePoints.map((kp: string, idx: number) => (
+                                <Badge key={idx} variant="outline" className="text-xs">
+                                  {kp}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  } catch {
+                    return <p className="text-sm text-muted-foreground">分析数据解析失败</p>;
+                  }
+                })()}
+              </div>
+            )}
+
+            {/* 题目列表 */}
+            <div>
+              <h4 className="font-medium mb-3">题目列表</h4>
+              {paperDetailData?.questions?.length > 0 ? (
+                <div className="space-y-3">
+                  {paperDetailData.questions.map((q: any, idx: number) => (
+                    <Card key={q.id} className="bg-secondary/20">
+                      <CardContent className="py-3">
+                        <div className="flex items-start gap-3">
+                          <span className="text-sm font-medium text-primary">{idx + 1}.</span>
+                          <div className="flex-1">
+                            <p className="text-sm">{q.content}</p>
+                            {q.options && (
+                              <div className="mt-2 space-y-1">
+                                {(() => {
+                                  try {
+                                    const opts = JSON.parse(q.options);
+                                    return opts.map((opt: any) => (
+                                      <div key={opt.label} className="text-sm text-muted-foreground">
+                                        {opt.label}. {opt.text}
+                                      </div>
+                                    ));
+                                  } catch {
+                                    return null;
+                                  }
+                                })()}
+                              </div>
+                            )}
+                            <div className="flex gap-2 mt-2">
+                              <Badge variant="outline" className="text-xs">
+                                答案: {q.correctAnswer}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs">
+                                {difficultyMap[q.difficulty]?.label}
+                              </Badge>
+                              {paperDetailData.paper?.questionScores && (() => {
+                                try {
+                                  const scores = JSON.parse(paperDetailData.paper.questionScores);
+                                  return scores[q.id] ? (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {scores[q.id]} 分
+                                    </Badge>
+                                  ) : null;
+                                } catch {
+                                  return null;
+                                }
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">加载题目中...</p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setViewingPaper(null);
+                  setPaperDetailData(null);
+                }}
+              >
+                关闭
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

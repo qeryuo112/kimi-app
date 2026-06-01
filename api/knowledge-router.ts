@@ -5,6 +5,16 @@ import { knowledgeNodes, knowledgeEdges } from "@db/schema";
 import { eq, and } from "drizzle-orm";
 
 export const knowledgeRouter = createRouter({
+  // 获取所有知识节点（用于题目关联）
+  list: authedQuery.query(async ({ ctx }) => {
+    const db = getDb();
+    const nodes = await db
+      .select()
+      .from(knowledgeNodes)
+      .where(eq(knowledgeNodes.userId, ctx.user.id));
+    return nodes;
+  }),
+
   // 获取科目的知识树
   getTree: authedQuery
     .input(z.object({ subjectId: z.number() }))
