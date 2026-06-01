@@ -338,6 +338,24 @@ export const wrongAnswers = mysqlTable("wrong_answers", {
 export type WrongAnswer = typeof wrongAnswers.$inferSelect;
 export type InsertWrongAnswer = typeof wrongAnswers.$inferInsert;
 
+// ==================== 试卷表 ====================
+export const examPapers = mysqlTable("exam_papers", {
+  id: serial("id").primaryKey(),
+  userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  questionIds: text("questionIds").notNull(), // JSON 数组，存储题目ID列表
+  subjectId: bigint("subjectId", { mode: "number", unsigned: true }),
+  knowledgeNodeIds: text("knowledgeNodeIds"), // JSON 数组，关联知识点
+  totalQuestions: int("totalQuestions").default(0).notNull(),
+  totalScore: int("totalScore").default(100).notNull(),
+  timeLimit: int("timeLimit"), // 考试时限（分钟）
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ExamPaper = typeof examPapers.$inferSelect;
+export type InsertExamPaper = typeof examPapers.$inferInsert;
+
 // ==================== 每日任务表 ====================
 export const dailyTodos = mysqlTable("daily_todos", {
   id: serial("id").primaryKey(),

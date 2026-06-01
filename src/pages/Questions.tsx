@@ -30,6 +30,8 @@ import {
   Link,
   Trash2,
   FileText,
+  FolderOpen,
+  Clock,
 } from "lucide-react";
 
 export default function Questions() {
@@ -69,11 +71,23 @@ export default function Questions() {
   const [isUploading, setIsUploading] = useState(false);
   const [manualUrl, setManualUrl] = useState("");
 
+  // 组卷状态
+  const [showCreatePaper, setShowCreatePaper] = useState(false);
+  const [paperForm, setPaperForm] = useState({
+    title: "",
+    description: "",
+    timeLimit: 60,
+  });
+  const [selectedPaperQuestions, setSelectedPaperQuestions] = useState<Set<number>>(new Set());
+
   const { data: settings } = trpc.settings.get.useQuery();
 
   // 获取学科和知识点列表，用于显示关联信息
   const { data: subjects } = trpc.subject.list.useQuery();
   const { data: knowledgeNodes } = trpc.knowledgeNode.list.useQuery();
+
+  // 获取试卷列表
+  const { data: examPapers } = trpc.exam.list.useQuery();
 
   // 创建映射表，方便查找
   const subjectMap = new Map((subjects || []).map((s: any) => [s.id, s]));
@@ -151,6 +165,28 @@ export default function Questions() {
       utils.question.getWrongAnswers.invalidate();
       setSelectedQuestions(new Set());
       toast.success(`已删除 ${data.count} 道题目`);
+    },
+  });
+
+  // 创建试卷
+  const createPaper = trpc.exam.create.useMutation({
+    onSuccess: () => {
+      utils.exam.list.invalidate();
+      setShowCreatePaper(false);
+      setPaperForm({ title: "", description: "", timeLimit: 60 });
+      setSelectedPaperQuestions(new Set());
+      toast.success("试卷创建成功");
+    },
+    onError: (err) => {
+      toast.error(err.message || "创建失败");
+    },
+  });
+
+  // 删除试卷
+  const deletePaper = trpc.exam.delete.useMutation({
+    onSuccess: () => {
+      utils.exam.list.invalidate();
+      toast.success("试卷已删除");
     },
   });
 
@@ -725,6 +761,132 @@ export default function Questions() {
         </Card>
       )}
 
+      {/* 创建试卷对话框 */}
+      {showCreatePaper && (
+        <Card className="mb-6 border-primary/30 fixed inset-4 z-50 max-h-[90vh] overflow-auto">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <FolderOpen className="h-4 w-4 text-primary" />
+              创建试卷
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">试卷名称</label>
+              <Input
+                value={paperForm.title}
+                onChange={(e) => setPaperForm({ ...paperForm, title: e.target.value })}
+                placeholder="例如：第一章综合测试"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">描述（可选）</label>
+              <Textarea
+                value={paperForm.description}
+                onChange={(e) => setPaperForm({ ...paperForm, description: e.target.value })}
+                placeholder="试卷说明或备注..."
+                className="min-h-[60px]"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">考试时限（分钟）</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={10}
+                  max={300}
+                  value={paperForm.timeLimit}
+                  onChange={(e) => setPaperForm({ ...paperForm, timeLimit: parseInt(e.target.value) || 60 })}
+                />
+                <span className="text-sm text-muted-foreground">分钟</span>
+              </div>
+            </div>
+
+            {/* 选择题库题目 */}
+            <div>
+              <label className="text-sm font-medium flex items-center justify-between">
+                <span>选择题库题目（已选 {selectedPaperQuestions.size} 题）</span>
+                <span className="text-xs text-muted-foreground">题库共 {questionList?.length || 0} 题</span>
+              </label>
+              <div className="mt-2 border rounded-lg overflow-hidden max-h-[300px] overflow-y-auto">
+                {questionList?.length === 0 ? (
+                  <div className="p-4 text-center text-muted-foreground text-sm">
+                    题库暂无题目
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {questionList?.map((q: any) => (
+                      <div
+                        key={q.id}
+                        className={`p-3 flex items-start gap-3 cursor-pointer hover:bg-secondary/30 transition-colors ${
+                          selectedPaperQuestions.has(q.id) ? "bg-primary/5" : ""
+                        }`}
+                        onClick={() => {
+                          const newSet = new Set(selectedPaperQuestions);
+                          if (newSet.has(q.id)) {
+                            newSet.delete(q.id);
+                          } else {
+                            newSet.add(q.id);
+                          }
+                          setSelectedPaperQuestions(newSet);
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 mt-0.5 rounded border-border"
+                          checked={selectedPaperQuestions.has(q.id)}
+                          onChange={() => {}}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm truncate">{q.content}</p>
+                          <div className="flex gap-1 mt-1">
+                            <Badge variant="outline" className="text-[10px]">
+                              {questionTypeMap[q.questionType]}
+                            </Badge>
+                            <Badge className={`text-[10px] ${difficultyMap[q.difficulty]?.color || ""}`}>
+                              {difficultyMap[q.difficulty]?.label}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  if (!paperForm.title.trim()) {
+                    toast.error("请输入试卷名称");
+                    return;
+                  }
+                  if (selectedPaperQuestions.size === 0) {
+                    toast.error("请至少选择一道题目");
+                    return;
+                  }
+                  createPaper.mutate({
+                    title: paperForm.title,
+                    description: paperForm.description,
+                    questionIds: Array.from(selectedPaperQuestions),
+                    timeLimit: paperForm.timeLimit,
+                  });
+                }}
+                disabled={createPaper.isPending || selectedPaperQuestions.size === 0}
+                className="flex-1"
+              >
+                {createPaper.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                创建试卷
+              </Button>
+              <Button variant="outline" onClick={() => setShowCreatePaper(false)} className="flex-1">
+                取消
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* 统计卡片 */}
       {stats && (
         <div className="grid grid-cols-4 gap-4 mb-6">
@@ -1242,11 +1404,12 @@ export default function Questions() {
         </Card>
       )}
 
-      {/* 题目列表/错题本 */}
+      {/* 题目列表/错题本/试卷 */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="all">全部题目</TabsTrigger>
           <TabsTrigger value="wrong">错题本</TabsTrigger>
+          <TabsTrigger value="papers">我的试卷</TabsTrigger>
         </TabsList>
 
         <TabsContent value="all" className="mt-4">
@@ -1396,6 +1559,88 @@ export default function Questions() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        {/* 试卷标签页 */}
+        <TabsContent value="papers" className="mt-4">
+          <div className="space-y-4">
+            {/* 创建试卷按钮 */}
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-muted-foreground">
+                共 {examPapers?.length || 0} 份试卷
+              </p>
+              <Button
+                onClick={() => {
+                  setShowCreatePaper(true);
+                  setSelectedPaperQuestions(new Set());
+                }}
+              >
+                <FolderOpen className="h-4 w-4 mr-1" />
+                从选择题库组卷
+              </Button>
+            </div>
+
+            {/* 试卷列表 */}
+            {!examPapers || examPapers.length === 0 ? (
+              <Card className="text-center py-12">
+                <CardContent>
+                  <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">暂无试卷</h3>
+                  <p className="text-muted-foreground mb-4">从题库中选择题目组卷</p>
+                  <Button onClick={() => setActiveTab("all")}>
+                    <BookOpen className="h-4 w-4 mr-1" />
+                    浏览题库
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {examPapers.map((paper: any) => (
+                  <Card key={paper.id} className="hover:border-primary/30 transition-colors">
+                    <CardContent className="pt-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h3 className="font-medium">{paper.title}</h3>
+                          {paper.description && (
+                            <p className="text-sm text-muted-foreground mt-0.5">{paper.description}</p>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-8 w-8 p-0"
+                          onClick={() => {
+                            if (confirm("确定要删除这份试卷吗？")) {
+                              deletePaper.mutate({ id: paper.id });
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <Badge variant="outline" className="text-xs">
+                          {paper.totalQuestions} 题
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          总分 {paper.totalScore}
+                        </Badge>
+                        {paper.timeLimit && (
+                          <Badge variant="outline" className="text-xs flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {paper.timeLimit} 分钟
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        创建于 {new Date(paper.createdAt).toLocaleDateString("zh-CN")}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>
