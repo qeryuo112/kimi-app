@@ -31,6 +31,7 @@ dist-ssr
 *.sqlite
 *.sqlite3
 db/migrations/*.sql
+mysql_data/
 # TypeScript cache
 *.tsbuildinfo
 # Build outputs
