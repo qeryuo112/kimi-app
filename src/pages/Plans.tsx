@@ -23,6 +23,7 @@ import {
   Check,
   Lightbulb,
   CheckSquare,
+  Library,
 } from "lucide-react";
 
 export default function Plans() {
@@ -35,6 +36,8 @@ export default function Plans() {
   const [selectedSubjectIndices, setSelectedSubjectIndices] = useState<Set<number>>(new Set());
   const [expandedPlan, setExpandedPlan] = useState<number | null>(null);
   const [planRequirements, setPlanRequirements] = useState<Record<number, string>>({});
+  const [showSelectSubjects, setShowSelectSubjects] = useState(false);
+  const [selectedExistingIds, setSelectedExistingIds] = useState<Set<number>>(new Set());
 
   // 创建计划
   const createPlan = trpc.plan.create.useMutation({
@@ -68,6 +71,31 @@ export default function Plans() {
       setSearchGoal("");
     },
   });
+
+  // 添加已存在的科目到计划
+  const addExistingSubjects = trpc.plan.addExistingSubjectsToPlan.useMutation({
+    onSuccess: (data) => {
+      if (expandedPlan !== null) {
+        utils.plan.getById.invalidate({ id: expandedPlan });
+      }
+      utils.plan.list.invalidate();
+      utils.subject.list.invalidate();
+      setShowSelectSubjects(false);
+      setSelectedExistingIds(new Set());
+      const added = data.results.filter((r) => r.success).length;
+      if (added > 0) {
+        toast.success(`成功添加 ${added} 个科目到计划`);
+      }
+      const errors = data.results.filter((r) => !r.success);
+      if (errors.length > 0) {
+        errors.forEach((e) => toast.error(`${e.title || "科目"}: ${e.error}`));
+      }
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // 获取科目管理列表
+  const { data: allSubjects } = trpc.subject.list.useQuery();
 
   // AI生成计划
   const aiGenerateSchedule = trpc.plan.aiGenerateSchedule.useMutation({
@@ -417,14 +445,140 @@ export default function Plans() {
                           )}
                         </div>
                       ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedPlanId(plan.id)}
-                        >
-                          <Search className="h-4 w-4 mr-1" />
-                          AI搜索科目
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSelectedPlanId(plan.id)}
+                          >
+                            <Search className="h-4 w-4 mr-1" />
+                            AI搜索科目
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedPlanId(plan.id);
+                              setShowSelectSubjects(true);
+                              setSelectedExistingIds(new Set());
+                            }}
+                          >
+                            <Library className="h-4 w-4 mr-1" />
+                            从科目管理选择
+                          </Button>
+                        </div>
+                      )}
+
+                      {/* 从科目管理选择科目弹窗 */}
+                      {selectedPlanId === plan.id && showSelectSubjects && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium">选择科目管理中的科目：</p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                const analyzed = allSubjects?.filter((s) => s.status === "analyzed" && !planDetail?.subjects?.some((ps) => ps.id === s.id));
+                                if (analyzed?.length) {
+                                  setSelectedExistingIds(new Set(analyzed.map((s) => s.id)));
+                                }
+                              }}
+                            >
+                              全选
+                            </Button>
+                          </div>
+
+                          {allSubjects?.filter((s) => s.status === "analyzed" && !planDetail?.subjects?.some((ps) => ps.id === s.id)).length === 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                              没有可用的已分析科目。请先前往「科目管理」导入并分析科目。
+                            </p>
+                          ) : (
+                            <div className="space-y-2 max-h-[300px] overflow-auto">
+                              {allSubjects
+                                ?.filter((s) => s.status === "analyzed" && !planDetail?.subjects?.some((ps) => ps.id === s.id))
+                                .map((s) => {
+                                  const isSelected = selectedExistingIds.has(s.id);
+                                  return (
+                                    <div
+                                      key={s.id}
+                                      className={`p-3 rounded-lg border transition-colors cursor-pointer ${
+                                        isSelected
+                                          ? "bg-primary/10 border-primary/40"
+                                          : "bg-secondary/30 border-border hover:bg-secondary/50"
+                                      }`}
+                                      onClick={() => {
+                                        const next = new Set(selectedExistingIds);
+                                        if (next.has(s.id)) {
+                                          next.delete(s.id);
+                                        } else {
+                                          next.add(s.id);
+                                        }
+                                        setSelectedExistingIds(next);
+                                      }}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <div
+                                            className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${
+                                              isSelected
+                                                ? "bg-primary border-primary"
+                                                : "border-muted-foreground/30"
+                                            }`}
+                                          >
+                                            {isSelected && <Check className="h-3.5 w-3.5 text-primary-foreground" />}
+                                          </div>
+                                          <span className="font-medium">{s.title}</span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <Badge variant="outline">难度{s.difficulty}</Badge>
+                                          <Badge variant="outline">优先级{s.priority}</Badge>
+                                        </div>
+                                      </div>
+                                      {s.description && (
+                                        <p className="text-sm text-muted-foreground mt-1 pl-7">
+                                          {s.description}
+                                        </p>
+                                      )}
+                                      <p className="text-xs text-muted-foreground mt-1 pl-7">
+                                        {s.category || "未分类"} · 已分析
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          )}
+
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => {
+                                if (!selectedPlanId || selectedExistingIds.size === 0) return;
+                                addExistingSubjects.mutate({
+                                  planId: selectedPlanId,
+                                  subjectIds: Array.from(selectedExistingIds),
+                                });
+                              }}
+                              disabled={addExistingSubjects.isPending || selectedExistingIds.size === 0}
+                              className="flex-1"
+                            >
+                              {addExistingSubjects.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                              ) : (
+                                <BookOpen className="h-4 w-4 mr-1" />
+                              )}
+                              添加所选科目 ({selectedExistingIds.size})
+                            </Button>
+                            <Button
+                              variant="outline"
+                              onClick={() => {
+                                setShowSelectSubjects(false);
+                                setSelectedExistingIds(new Set());
+                              }}
+                            >
+                              取消
+                            </Button>
+                          </div>
+                        </div>
                       )}
 
                       {/* 已关联科目 */}

@@ -451,7 +451,103 @@ export const planRouter = createRouter({
       return { success: true, subjects: createdSubjects };
     }),
 
-  // AI生成复习计划（两层：月计划 + 日计划）
+  // 将已存在的科目（来自科目管理）添加到计划
+  addExistingSubjectsToPlan: authedQuery
+    .input(
+      z.object({
+        planId: z.number(),
+        subjectIds: z.array(z.number()).min(1),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      // 1. 验证计划存在且属于当前用户
+      const [plan] = await db
+        .select()
+        .from(plans)
+        .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
+
+      if (!plan) {
+        throw new Error("计划不存在");
+      }
+
+      const results = [];
+
+      for (const subjectId of input.subjectIds) {
+        // 2. 验证科目存在且属于当前用户
+        const [subject] = await db
+          .select()
+          .from(subjects)
+          .where(and(eq(subjects.id, subjectId), eq(subjects.userId, ctx.user.id)));
+
+        if (!subject) {
+          results.push({ subjectId, success: false, error: "科目不存在或无权限" });
+          continue;
+        }
+
+        // 3. 验证科目已分析（有知识节点）
+        const nodes = await db
+          .select({ id: knowledgeNodes.id })
+          .from(knowledgeNodes)
+          .where(
+            and(
+              eq(knowledgeNodes.subjectId, subjectId),
+              eq(knowledgeNodes.userId, ctx.user.id)
+            )
+          );
+
+        if (nodes.length === 0) {
+          results.push({ subjectId, title: subject.title, success: false, error: "科目尚未分析，请先使用AI分析功能生成知识树" });
+          continue;
+        }
+
+        // 4. 检查是否已关联
+        const [existing] = await db
+          .select()
+          .from(planSubjects)
+          .where(
+            and(
+              eq(planSubjects.planId, input.planId),
+              eq(planSubjects.subjectId, subjectId)
+            )
+          );
+
+        if (existing) {
+          results.push({ subjectId, title: subject.title, success: false, error: "该科目已关联到此计划" });
+          continue;
+        }
+
+        // 5. 获取当前最大 orderIndex
+        const [lastOrder] = await db
+          .select({ orderIndex: planSubjects.orderIndex })
+          .from(planSubjects)
+          .where(eq(planSubjects.planId, input.planId))
+          .orderBy(desc(planSubjects.orderIndex))
+          .limit(1);
+
+        const orderIndex = (lastOrder?.orderIndex ?? -1) + 1;
+
+        // 6. 关联到计划
+        await db.insert(planSubjects).values({
+          planId: input.planId,
+          subjectId,
+          priority: subject.priority || 2,
+          orderIndex,
+        });
+
+        results.push({ subjectId, title: subject.title, success: true });
+      }
+
+      const successCount = results.filter((r) => r.success).length;
+
+      return {
+        success: successCount > 0,
+        added: successCount,
+        total: input.subjectIds.length,
+        results,
+      };
+    }),
   aiGenerateSchedule: authedQuery
     .input(z.object({ id: z.number(), requirements: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
