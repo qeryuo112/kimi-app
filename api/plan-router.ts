@@ -1,6 +1,24 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
+import { env } from "./lib/env";
+import fs from "fs";
+import path from "path";
+
+// 调试日志工具
+const PLAN_DEBUG_LOG = path.join(process.cwd(), "plan-debug.log");
+function planDebugLog(label: string, data?: unknown) {
+  const now = new Date().toISOString();
+  const line = data !== undefined
+    ? `[${now}] [PLAN-DEBUG] ${label} | ${typeof data === "string" ? data : JSON.stringify(data)}`
+    : `[${now}] [PLAN-DEBUG] ${label}`;
+  console.log(line);
+  try {
+    fs.appendFileSync(PLAN_DEBUG_LOG, line + "\n");
+  } catch {
+    // 忽略日志文件写入错误
+  }
+}
 import {
   plans,
   planSubjects,
@@ -13,9 +31,12 @@ import {
   reviewSchedules,
   studyLogs,
   skillAssessments,
+  questions,
+  userAnswers,
+  wrongAnswers,
 } from "@db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills } from "./lib/ai";
+import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills, generateCompleteStudyPlanFromFile, generateRoundAndMonthlyPlanFromFile, generateWeeklyPlanFromFile, generateDailyPlanFromFile, generateWeeklyDailyPlanFromFile } from "./lib/ai";
 
 export const planRouter = createRouter({
   // 列出用户的所有计划
@@ -214,7 +235,44 @@ export const planRouter = createRouter({
             )
           );
 
-        // 2.8 删除科目
+        // 2.8 获取这些科目下的所有题目ID
+        const subjectQuestions = await db
+          .select({ id: questions.id })
+          .from(questions)
+          .where(
+            and(
+              eq(questions.userId, ctx.user.id),
+              inArray(questions.subjectId, subjectIds)
+            )
+          );
+
+        const questionIds = subjectQuestions.map((q) => q.id);
+
+        // 2.9 删除用户答题记录（基于题目）
+        if (questionIds.length > 0) {
+          await db
+            .delete(userAnswers)
+            .where(
+              and(
+                eq(userAnswers.userId, ctx.user.id),
+                inArray(userAnswers.questionId, questionIds)
+              )
+            );
+        }
+
+        // 2.10 删除错题记录（基于题目）
+        if (questionIds.length > 0) {
+          await db
+            .delete(wrongAnswers)
+            .where(
+              and(
+                eq(wrongAnswers.userId, ctx.user.id),
+                inArray(wrongAnswers.questionId, questionIds)
+              )
+            );
+        }
+
+        // 2.11 删除科目
         await db
           .delete(subjects)
           .where(
@@ -551,6 +609,9 @@ export const planRouter = createRouter({
   aiGenerateSchedule: authedQuery
     .input(z.object({ id: z.number(), requirements: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
+      const overallStart = Date.now();
+      planDebugLog("aiGenerateSchedule 开始", { planId: input.id, requirements: input.requirements });
+
       const db = getDb();
       const [plan] = await db
         .select()
@@ -574,7 +635,7 @@ export const planRouter = createRouter({
         .where(and(eq(subjects.userId, ctx.user.id)))
         .then((rows) => rows.filter((s) => subjectIds.includes(s.id)));
 
-      // 检查每个科目是否已分析（有知识节点）
+      planDebugLog("aiGenerateSchedule 科目信息", { subjectCount: planSubs.length, subjectTitles: planSubs.map(s => s.title) });
       const unanalyzedSubjects: string[] = [];
       const subjectNodesMap = new Map<number, Array<{ title: string; estimatedMinutes: number; difficulty: number; importance: number }>>();
       const subjectNodeTitlesMap = new Map<number, string[]>();
@@ -604,8 +665,13 @@ export const planRouter = createRouter({
       }
 
       if (unanalyzedSubjects.length > 0) {
+        planDebugLog("aiGenerateSchedule 存在未分析科目", { unanalyzedSubjects });
         throw new Error(`以下科目尚未分析，请先使用AI分析功能生成知识树：${unanalyzedSubjects.join("、")}`);
       }
+
+      planDebugLog("aiGenerateSchedule 所有科目已分析", {
+        totalNodes: planSubs.reduce((sum, s) => sum + (subjectNodeTitlesMap.get(s.id)?.length || 0), 0)
+      });
 
       const [setting] = await db
         .select()
@@ -620,75 +686,175 @@ export const planRouter = createRouter({
       const totalMonths = plan.totalMonths || 3;
       const reviewRounds = plan.reviewRounds || 3;
 
-      // 第一层：生成轮次计划 + 月计划
-      const roundMonthlyResult = await generateRoundAndMonthlyPlan(
-        planSubs.map((s) => ({
-          title: s.title,
-          priority: s.priority,
-          difficulty: s.difficulty,
-          knowledgeNodes: subjectNodeTitlesMap.get(s.id) || [],
-        })),
-        plan.dailyMinutes,
-        startDate,
-        totalMonths,
-        reviewRounds,
-        input.requirements || undefined,
+      // 将科目和知识树数据保存为临时文件
+      const subjectsData = planSubs.map((s) => ({
+        title: s.title,
+        priority: s.priority,
+        difficulty: s.difficulty,
+        knowledgeNodes: subjectNodesMap.get(s.id) || [],
+      }));
+
+      const fileData = {
+        subjects: subjectsData,
+        config: {
+          dailyMinutes: plan.dailyMinutes,
+          startDate,
+          totalMonths,
+          reviewRounds,
+          requirements: input.requirements || undefined,
+        }
+      };
+
+      // 获取文件服务器URL
+      const fileServerUrl = setting?.fileServerUrl?.trim();
+      if (!fileServerUrl) {
+        throw new Error("请先设置文件上传服务器地址。在「设置」页配置 fileServerUrl（如 http://VPS_IP:3001）");
+      }
+
+      // 保存到临时文件（使用.txt扩展名以兼容上传服务器）
+      const tempDir = path.join(process.cwd(), "temp");
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      const tempFileName = `plan-data-${ctx.user.id}-${plan.id}-${Date.now()}.txt`;
+      const tempFilePath = path.join(tempDir, tempFileName);
+      fs.writeFileSync(tempFilePath, JSON.stringify(fileData, null, 2));
+
+      planDebugLog("aiGenerateSchedule 已保存临时文件", { tempFilePath });
+
+      // 上传到文件服务器
+      const uploadFormData = new FormData();
+      const fileBuffer = fs.readFileSync(tempFilePath);
+      const blob = new Blob([fileBuffer], { type: "application/json" });
+      uploadFormData.append("file", blob, tempFileName);
+
+      const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
+      planDebugLog("aiGenerateSchedule 开始上传文件", { uploadUrl, tempFileName });
+
+      let uploadRes;
+      try {
+        uploadRes = await fetch(uploadUrl, {
+          method: "POST",
+          body: uploadFormData,
+        });
+        planDebugLog("aiGenerateSchedule 文件上传请求完成", { status: uploadRes.status });
+      } catch (fetchErr) {
+        planDebugLog("aiGenerateSchedule 文件上传请求失败", { error: String(fetchErr) });
+        throw new Error(`文件上传请求失败: ${fetchErr}`);
+      }
+
+      // 删除临时文件
+      try {
+        fs.unlinkSync(tempFilePath);
+      } catch {}
+
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text().catch(() => "{}");
+        planDebugLog("aiGenerateSchedule 文件上传返回错误", { status: uploadRes.status, error: errText });
+        throw new Error(`文件上传失败: ${uploadRes.status} - ${errText}`);
+      }
+
+      let uploadData;
+      try {
+        uploadData = await uploadRes.json();
+      } catch (parseErr) {
+        const resText = await uploadRes.text().catch(() => "无法读取响应");
+        planDebugLog("aiGenerateSchedule 解析上传响应失败", { error: String(parseErr), response: resText });
+        throw new Error(`解析上传响应失败: ${parseErr}`);
+      }
+
+      const fileUrl = uploadData.url;
+      if (!fileUrl) {
+        planDebugLog("aiGenerateSchedule 上传响应缺少URL", { uploadData });
+        throw new Error("文件上传响应中缺少URL");
+      }
+
+      planDebugLog("aiGenerateSchedule 文件上传成功", { fileUrl, subjectsCount: subjectsData.length });
+
+      // 验证文件URL是否可访问
+      try {
+        const fileCheckRes = await fetch(fileUrl, { method: "HEAD" });
+        planDebugLog("aiGenerateSchedule 文件URL验证", {
+          fileUrl,
+          accessible: fileCheckRes.ok,
+          status: fileCheckRes.status,
+          contentType: fileCheckRes.headers.get("content-type"),
+          contentLength: fileCheckRes.headers.get("content-length"),
+        });
+      } catch (checkErr) {
+        planDebugLog("aiGenerateSchedule 文件URL验证失败(非致命)", { error: String(checkErr) });
+      }
+
+      // 第1层：生成轮次+月计划（使用文件URL）
+      planDebugLog("aiGenerateSchedule 开始第1层：轮次/月计划", { totalMonths, reviewRounds });
+      const stage1Start = Date.now();
+
+      const roundMonthlyResult = await generateRoundAndMonthlyPlanFromFile(
+        fileUrl,
+        {
+          dailyMinutes: plan.dailyMinutes,
+          startDate,
+          totalMonths,
+          reviewRounds,
+          requirements: input.requirements || undefined,
+        },
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined
       );
 
-      // 第二层：生成周计划
+      planDebugLog("aiGenerateSchedule 第1层完成", {
+        elapsedMs: Date.now() - stage1Start,
+        roundsCount: roundMonthlyResult.rounds.length,
+        monthsCount: roundMonthlyResult.months.length,
+        sampleRounds: roundMonthlyResult.rounds.slice(0, 2),
+        sampleMonths: roundMonthlyResult.months.slice(0, 2)
+      });
+
+      // 第2层：生成周计划（使用文件URL）
       const monthlyContext = roundMonthlyResult.months
         .map((m) => `第${m.month}月(${m.monthName})：${m.focus}；科目：${m.subjects?.join("、")}；目标：${m.goals?.join("、")}`)
         .join("\n");
 
       const totalWeeks = Math.ceil(totalMonths * 4.3);
-      const weeklyResult = await generateWeeklyPlan(
-        planSubs.map((s) => ({
-          title: s.title,
-          priority: s.priority,
-          difficulty: s.difficulty,
-          knowledgeNodes: subjectNodesMap.get(s.id) || [],
-        })),
-        plan.dailyMinutes,
-        totalWeeks,
-        monthlyContext,
-        input.requirements || undefined,
+
+      planDebugLog("aiGenerateSchedule 开始第2层：周计划", { totalWeeks });
+      const stage2Start = Date.now();
+
+      const weeklyResult = await generateWeeklyPlanFromFile(
+        fileUrl,
+        {
+          dailyMinutes: plan.dailyMinutes,
+          totalWeeks,
+          monthlyContext,
+          requirements: input.requirements || undefined,
+        },
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined
       );
 
-      // 第三层：生成日计划
-      const weeklyContext = weeklyResult.weeks
-        .map((w) => `第${w.week}周(第${w.month}月)：${w.focus}；知识点：${w.knowledgeNodes?.join("、")}`)
-        .join("\n");
+      planDebugLog("aiGenerateSchedule 第2层完成", {
+        elapsedMs: Date.now() - stage2Start,
+        weeksCount: weeklyResult.weeks.length,
+        sampleWeeks: weeklyResult.weeks.slice(0, 3)
+      });
 
-      const totalDays = totalMonths * 30;
-      const dailyResult = await generateDailyPlan(
-        planSubs.map((s) => ({
-          title: s.title,
-          priority: s.priority,
-          difficulty: s.difficulty,
-          knowledgeNodes: subjectNodesMap.get(s.id) || [],
-        })),
-        plan.dailyMinutes,
-        startDate,
-        totalDays,
-        weeklyContext,
-        input.requirements || undefined,
-        setting?.aiApiKey || undefined,
-        setting?.aiApiEndpoint || undefined,
-        setting?.aiModel || undefined
-      );
-
+      // 日计划留空，按周单独生成
       const fullPlan = {
         roundPlan: roundMonthlyResult.rounds,
         monthlyPlan: roundMonthlyResult.months,
         weeklyPlan: weeklyResult.weeks,
-        dailyPlan: dailyResult.days,
+        dailyPlan: [],
+        generatedWeeks: [], // 记录哪些周已生成日计划
       };
+
+      planDebugLog("aiGenerateSchedule 全部完成（不含日计划）", {
+        totalElapsedMs: Date.now() - overallStart,
+        roundPlanCount: fullPlan.roundPlan.length,
+        monthlyPlanCount: fullPlan.monthlyPlan.length,
+        weeklyPlanCount: fullPlan.weeklyPlan.length,
+      });
 
       // 保存AI计划
       await db
@@ -708,5 +874,176 @@ export const planRouter = createRouter({
         .set({ aiPlan: null })
         .where(and(eq(plans.id, input.id), eq(plans.userId, ctx.user.id)));
       return { success: true };
+    }),
+
+  // 为指定周生成日计划
+  aiGenerateWeeklyDaily: authedQuery
+    .input(z.object({
+      planId: z.number(),
+      weekNumber: z.number(),
+      requirements: z.string().optional()
+    }))
+    .mutation(async ({ ctx, input }) => {
+      planDebugLog("aiGenerateWeeklyDaily 开始", { planId: input.planId, weekNumber: input.weekNumber });
+
+      const db = getDb();
+      const [plan] = await db
+        .select()
+        .from(plans)
+        .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
+
+      if (!plan) throw new Error("计划不存在");
+
+      const aiPlan = plan.aiPlan ? JSON.parse(plan.aiPlan) : null;
+      if (!aiPlan || !aiPlan.weeklyPlan) {
+        throw new Error("请先生成整体计划");
+      }
+
+      const weekData = aiPlan.weeklyPlan.find((w: {week: number}) => w.week === input.weekNumber);
+      if (!weekData) {
+        throw new Error(`第${input.weekNumber}周不存在`);
+      }
+
+      // 检查该周是否已生成
+      const generatedWeeks: number[] = aiPlan.generatedWeeks || [];
+      if (generatedWeeks.includes(input.weekNumber)) {
+        throw new Error(`第${input.weekNumber}周的日计划已生成`);
+      }
+
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      const startDate = plan.startDate
+        ? new Date(plan.startDate).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0];
+
+      // 获取科目数据
+      const ps = await db
+        .select()
+        .from(planSubjects)
+        .where(eq(planSubjects.planId, plan.id));
+      const subjectIds = ps.map((p) => p.subjectId);
+
+      const planSubs = await db
+        .select()
+        .from(subjects)
+        .where(and(eq(subjects.userId, ctx.user.id)))
+        .then((rows) => rows.filter((s) => subjectIds.includes(s.id)));
+
+      const subjectsData = planSubs.map((s) => ({
+        title: s.title,
+        priority: s.priority,
+        difficulty: s.difficulty,
+      }));
+
+      // 构建周上下文
+      const weeklyContext = `第${weekData.week}周(第${weekData.month}月)：${weekData.focus}；知识点：${weekData.knowledgeNodes?.join("、")}`;
+
+      // 上传数据到文件服务器
+      const fileData = {
+        subjects: subjectsData,
+        week: weekData,
+        config: {
+          dailyMinutes: plan.dailyMinutes,
+          startDate,
+          weekNumber: input.weekNumber,
+          requirements: input.requirements,
+        }
+      };
+
+      const fileServerUrl = setting?.fileServerUrl?.trim();
+      if (!fileServerUrl) {
+        throw new Error("请先设置文件上传服务器地址");
+      }
+
+      const tempDir = path.join(process.cwd(), "temp");
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      const tempFileName = `weekly-daily-${ctx.user.id}-${plan.id}-${input.weekNumber}-${Date.now()}.txt`;
+      const tempFilePath = path.join(tempDir, tempFileName);
+      fs.writeFileSync(tempFilePath, JSON.stringify(fileData, null, 2));
+
+      const uploadFormData = new FormData();
+      const fileBuffer = fs.readFileSync(tempFilePath);
+      const blob = new Blob([fileBuffer], { type: "application/json" });
+      uploadFormData.append("file", blob, tempFileName);
+
+      const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
+      const uploadRes = await fetch(uploadUrl, {
+        method: "POST",
+        body: uploadFormData,
+      });
+
+      try {
+        fs.unlinkSync(tempFilePath);
+      } catch {}
+
+      if (!uploadRes.ok) {
+        throw new Error(`文件上传失败: ${uploadRes.status}`);
+      }
+
+      const uploadData = await uploadRes.json();
+      const fileUrl = uploadData.url;
+      if (!fileUrl) {
+        throw new Error("文件上传响应中缺少URL");
+      }
+
+      // 调用AI生成该周日计划
+      const weekDaysResult = await generateWeeklyDailyPlanFromFile(
+        fileUrl,
+        {
+          dailyMinutes: plan.dailyMinutes,
+          startDate,
+          weekNumber: input.weekNumber,
+          weeklyContext,
+          requirements: input.requirements,
+        },
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
+
+      // 更新AI计划
+      const existingDays: Array<{
+        day: number;
+        date: string;
+        week: number;
+        month: number;
+        subject: string;
+        knowledgeNodes: string[];
+        estimatedMinutes: number;
+        focus: string;
+        review: boolean;
+      }> = aiPlan.dailyPlan || [];
+
+      // 合并新生成的日计划
+      const mergedDays = [...existingDays, ...weekDaysResult.days];
+      // 按day排序
+      mergedDays.sort((a, b) => a.day - b.day);
+
+      // 更新generatedWeeks
+      const newGeneratedWeeks = [...generatedWeeks, input.weekNumber];
+
+      const updatedPlan = {
+        ...aiPlan,
+        dailyPlan: mergedDays,
+        generatedWeeks: newGeneratedWeeks,
+      };
+
+      await db
+        .update(plans)
+        .set({ aiPlan: JSON.stringify(updatedPlan) })
+        .where(eq(plans.id, input.planId));
+
+      planDebugLog("aiGenerateWeeklyDaily 完成", {
+        weekNumber: input.weekNumber,
+        daysCount: weekDaysResult.days.length,
+        totalDays: mergedDays.length
+      });
+
+      return { success: true, weekNumber: input.weekNumber, daysCount: weekDaysResult.days.length };
     }),
 });

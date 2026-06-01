@@ -99,10 +99,14 @@ export default function Plans() {
 
   // AI生成计划
   const aiGenerateSchedule = trpc.plan.aiGenerateSchedule.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
       if (expandedPlan !== null) {
         utils.plan.getById.invalidate({ id: expandedPlan });
       }
+      toast.success(`复习计划框架生成成功！共 ${data.weeklyPlan?.length || 0} 周，请在周计划Tab中逐周生成日计划`);
+    },
+    onError: (err) => {
+      toast.error(`生成失败: ${err.message}`);
     },
   });
 
@@ -116,6 +120,22 @@ export default function Plans() {
       toast.success("复习计划已删除");
     },
     onError: (err) => toast.error(err.message),
+  });
+
+  // 按周生成日计划
+  const [generatingWeek, setGeneratingWeek] = useState<number | null>(null);
+  const aiGenerateWeeklyDaily = trpc.plan.aiGenerateWeeklyDaily.useMutation({
+    onSuccess: (data) => {
+      if (expandedPlan !== null) {
+        utils.plan.getById.invalidate({ id: expandedPlan });
+      }
+      toast.success(`第${data.weekNumber}周日计划生成成功！共 ${data.daysCount} 天`);
+      setGeneratingWeek(null);
+    },
+    onError: (err) => {
+      toast.error(`生成失败: ${err.message}`);
+      setGeneratingWeek(null);
+    },
   });
 
   const generateTodos = trpc.todo.generateTodayTodos.useMutation({
@@ -762,27 +782,63 @@ export default function Plans() {
 
                                   {/* 周计划 */}
                                   <TabsContent value="weeks" className="space-y-2 mt-3 max-h-[500px] overflow-auto">
-                                    {hasWeekly ? schedule.weeklyPlan.map((w: any, i: number) => (
-                                      <div key={i} className="p-3 rounded-lg bg-secondary/20 border border-border">
-                                        <div className="flex items-center justify-between">
-                                          <span className="font-medium text-sm">第{w.week}周</span>
-                                          <Badge variant="outline">第{w.month}月</Badge>
-                                        </div>
-                                        <p className="text-sm text-primary mt-1">{w.focus}</p>
-                                        <div className="flex flex-wrap gap-1 mt-1">
-                                          {w.subjects?.map((s: string, idx: number) => (
-                                            <Badge key={idx} variant="secondary" className="text-[10px]">{s}</Badge>
-                                          ))}
-                                        </div>
-                                        {w.knowledgeNodes && w.knowledgeNodes.length > 0 && (
+                                    {hasWeekly ? schedule.weeklyPlan.map((w: any, i: number) => {
+                                      const weekNum = w.week;
+                                      const isGenerated = (schedule.generatedWeeks || []).includes(weekNum);
+                                      const hasDailyForWeek = schedule.dailyPlan?.some((d: any) => d.week === weekNum);
+                                      const isGenerating = generatingWeek === weekNum;
+
+                                      return (
+                                        <div key={i} className="p-3 rounded-lg bg-secondary/20 border border-border">
+                                          <div className="flex items-center justify-between">
+                                            <span className="font-medium text-sm">第{w.week}周</span>
+                                            <Badge variant="outline">第{w.month}月</Badge>
+                                          </div>
+                                          <p className="text-sm text-primary mt-1">{w.focus}</p>
                                           <div className="flex flex-wrap gap-1 mt-1">
-                                            {w.knowledgeNodes.map((n: string, idx: number) => (
-                                              <Badge key={idx} variant="outline" className="text-[10px]">{n}</Badge>
+                                            {w.subjects?.map((s: string, idx: number) => (
+                                              <Badge key={idx} variant="secondary" className="text-[10px]">{s}</Badge>
                                             ))}
                                           </div>
-                                        )}
-                                      </div>
-                                    )) : <p className="text-sm text-muted-foreground">暂无周计划</p>}
+                                          {w.knowledgeNodes && w.knowledgeNodes.length > 0 && (
+                                            <div className="flex flex-wrap gap-1 mt-1">
+                                              {w.knowledgeNodes.map((n: string, idx: number) => (
+                                                <Badge key={idx} variant="outline" className="text-[10px]">{n}</Badge>
+                                              ))}
+                                            </div>
+                                          )}
+                                          <div className="mt-2 pt-2 border-t border-border/50">
+                                            {isGenerating ? (
+                                              <Button variant="ghost" size="sm" disabled className="w-full h-7 text-xs">
+                                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                                生成中...
+                                              </Button>
+                                            ) : isGenerated || hasDailyForWeek ? (
+                                              <Button variant="ghost" size="sm" disabled className="w-full h-7 text-xs text-green-600">
+                                                <Check className="h-3 w-3 mr-1" />
+                                                日计划已生成
+                                              </Button>
+                                            ) : (
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full h-7 text-xs"
+                                                onClick={() => {
+                                                  setGeneratingWeek(weekNum);
+                                                  aiGenerateWeeklyDaily.mutate({
+                                                    planId: plan.id,
+                                                    weekNumber: weekNum,
+                                                  });
+                                                }}
+                                              >
+                                                <Sparkles className="h-3 w-3 mr-1" />
+                                                生成日计划
+                                              </Button>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    }) : <p className="text-sm text-muted-foreground">暂无周计划</p>}
                                   </TabsContent>
 
                                   {/* 日计划 */}

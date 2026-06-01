@@ -18,7 +18,7 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 
 // 允许的扩展名
 const ALLOWED_EXTS = new Set([
-  ".pdf", ".doc", ".docx", ".txt", ".md",
+  ".pdf", ".doc", ".docx", ".txt", ".md", ".json",
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
   ".mp4", ".mov", ".avi", ".mkv", ".webm"
 ]);

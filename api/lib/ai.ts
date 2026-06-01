@@ -1,5 +1,82 @@
 // AI服务模块 - 调用Kimi API进行内容分析
 import { env } from "./env";
+import fs from "fs";
+import path from "path";
+import axios from "axios";
+
+// ========== 调试日志工具 ==========
+const DEBUG_LOG_FILE = path.join(process.cwd(), "ai-debug.log");
+
+function debugLog(label: string, data?: unknown) {
+  const now = new Date().toISOString();
+  const line = data !== undefined
+    ? `[${now}] [AI-DEBUG] ${label} | ${typeof data === "string" ? data : JSON.stringify(data, null, 2)}`
+    : `[${now}] [AI-DEBUG] ${label}`;
+  console.log(line);
+  try {
+    fs.appendFileSync(DEBUG_LOG_FILE, line + "\n");
+  } catch {
+    // 忽略日志文件写入错误
+  }
+}
+
+function debugLogError(label: string, error: unknown) {
+  const now = new Date().toISOString();
+  const errMsg = error instanceof Error ? `${error.name}: ${error.message}\n${error.stack}` : String(error);
+  const line = `[${now}] [AI-DEBUG-ERROR] ${label}\n${errMsg}`;
+  console.error(line);
+  try {
+    fs.appendFileSync(DEBUG_LOG_FILE, line + "\n");
+  } catch {
+    // 忽略日志文件写入错误
+  }
+}
+
+// 从AI响应中提取JSON（处理前导空白、markdown代码块等）
+function extractJsonFromResponse(response: string): string {
+  if (!response) return "{}";
+
+  // 去除前导和尾随空白
+  let trimmed = response.trim();
+
+  // 如果包裹在markdown代码块中，提取其中的内容
+  if (trimmed.startsWith("```")) {
+    const lines = trimmed.split("\n");
+    // 去掉开头的 ```json 或 ```
+    const startIdx = lines[0].startsWith("```") ? 1 : 0;
+    // 去掉结尾的 ```
+    const endIdx = lines[lines.length - 1] === "```" ? lines.length - 1 : lines.length;
+    trimmed = lines.slice(startIdx, endIdx).join("\n");
+  }
+
+  // 查找JSON对象的开始位置（第一个{或[）
+  const objectStart = trimmed.indexOf("{");
+  const arrayStart = trimmed.indexOf("[");
+
+  let jsonStart = -1;
+  if (objectStart === -1) {
+    jsonStart = arrayStart;
+  } else if (arrayStart === -1) {
+    jsonStart = objectStart;
+  } else {
+    jsonStart = Math.min(objectStart, arrayStart);
+  }
+
+  if (jsonStart > 0) {
+    trimmed = trimmed.slice(jsonStart);
+  }
+
+  // 查找JSON对象的结束位置（最后一个}或]）
+  const lastBrace = trimmed.lastIndexOf("}");
+  const lastBracket = trimmed.lastIndexOf("]");
+  const jsonEnd = Math.max(lastBrace, lastBracket);
+
+  if (jsonEnd > 0 && jsonEnd < trimmed.length - 1) {
+    trimmed = trimmed.slice(0, jsonEnd + 1);
+  }
+
+  return trimmed || "{}";
+}
 
 export interface TextContent {
   type: "text";
@@ -50,8 +127,11 @@ export async function chatWithAI(
   apiKey?: string,
   apiUrl?: string,
   modelName?: string,
-  requireJson = false
+  requireJson = false,
+  debugLabel?: string
 ): Promise<string> {
+  const label = debugLabel || "chatWithAI";
+  const startTime = Date.now();
   const key = apiKey || env.appSecret;
   let url = apiUrl || `${env.kimiOpenUrl}/v1/chat/completions`;
 
@@ -72,32 +152,64 @@ export async function chatWithAI(
   // 计算请求体大致大小用于调试
   const bodyStr = JSON.stringify(body);
   const bodySizeMB = (bodyStr.length / 1024 / 1024).toFixed(2);
-  console.log(`[chatWithAI] request to ${url}, model=${modelName || "kimi-latest"}, bodySize=${bodySizeMB}MB, messages=${messages.length}`);
+  const promptLength = messages.reduce((sum, m) => {
+    if (typeof m.content === "string") return sum + m.content.length;
+    return sum + m.content.reduce((s, c) => s + (c.type === "text" ? c.text.length : 50), 0);
+  }, 0);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 300000); // 300秒超时
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: bodyStr,
-    signal: controller.signal,
+  debugLog(`${label} 请求开始`, {
+    url,
+    model: modelName || "kimi-latest",
+    bodySizeMB,
+    messagesCount: messages.length,
+    promptChars: promptLength,
+    requireJson,
+    temperature,
   });
-  clearTimeout(timeoutId);
 
-  if (!response.ok) {
-    const error = await response.text();
-    console.error(`[chatWithAI] API error ${response.status}: ${error}`);
-    throw new Error(`AI API调用失败 (${response.status}): ${error}`);
+  try {
+    debugLog(`${label} 发起axios请求`, { url, bodyLength: bodyStr.length });
+
+    const response = await axios.post(url, body, {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      timeout: 3600000, // 3600秒 = 1小时超时
+      responseType: "json",
+    });
+
+    const elapsed = Date.now() - startTime;
+
+    debugLog(`${label} 收到响应`, { status: response.status });
+    const data = response.data as KimiResponse;
+    const content = data.choices?.[0]?.message?.content || "";
+
+    // 记录响应的前500字符用于调试
+    const previewContent = content.slice(0, 500);
+    const hasMore = content.length > 500 ? `... (总共${content.length}字符)` : "";
+    debugLog(`${label} 请求成功`, {
+      elapsedMs: elapsed,
+      responseLength: content.length,
+      firstChars: previewContent + hasMore,
+      choicesCount: data.choices?.length || 0,
+    });
+    return content;
+  } catch (err) {
+    const elapsed = Date.now() - startTime;
+    if (axios.isAxiosError(err) && err.code === "ECONNABORTED") {
+      debugLogError(`${label} 请求超时 (已耗时${elapsed}ms)`, err);
+      throw new Error(`AI API请求超时（超过3600秒未响应）。请检查网络连接或稍后重试。`);
+    }
+    if (axios.isAxiosError(err)) {
+      const status = err.response?.status;
+      const errorData = err.response?.data;
+      debugLogError(`${label} API错误 ${status || "unknown"} (耗时${elapsed}ms)`, errorData || err.message);
+      throw new Error(`AI API调用失败 (${status}): ${JSON.stringify(errorData) || err.message}`);
+    }
+    debugLogError(`${label} 请求异常 (耗时${elapsed}ms)`, err);
+    throw err;
   }
-
-  const data = (await response.json()) as KimiResponse;
-  const content = data.choices[0]?.message.content || "";
-  console.log(`[chatWithAI] success, response length=${content.length}`);
-  return content;
 }
 
 // 分析书籍/科目内容，生成知识树 —— AI自动判定难度/优先级
@@ -584,6 +696,7 @@ ${nodesInfo}
 复习轮数：${reviewRounds}轮
 ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
 
+  debugLog("generateRoundAndMonthlyPlan 开始调用AI", { subjectCount: subjects.length, totalMonths, reviewRounds, promptLength: userPrompt.length });
   const result = await chatWithAI(
     [
       { role: "system", content: systemPrompt },
@@ -593,16 +706,19 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
     apiKey,
     apiUrl,
     modelName,
-    true
+    true,
+    "generateRoundAndMonthlyPlan"
   );
 
   try {
     const parsed = JSON.parse(result);
+    debugLog("generateRoundAndMonthlyPlan 解析成功", { roundsCount: parsed.rounds?.length, monthsCount: parsed.months?.length });
     return {
       rounds: parsed.rounds || [],
       months: parsed.months || [],
     };
-  } catch {
+  } catch (err) {
+    debugLogError("generateRoundAndMonthlyPlan JSON解析失败", { rawResponse: result.slice(0, 500), error: err });
     throw new Error("AI返回的轮次/月计划数据格式不正确");
   }
 }
@@ -668,6 +784,7 @@ ${subjectsInfo}
 ${monthlyPlanContext}
 ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
 
+  debugLog("generateWeeklyPlan 开始调用AI", { subjectCount: subjects.length, totalWeeks, promptLength: userPrompt.length });
   const result = await chatWithAI(
     [
       { role: "system", content: systemPrompt },
@@ -677,13 +794,16 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
     apiKey,
     apiUrl,
     modelName,
-    true
+    true,
+    "generateWeeklyPlan"
   );
 
   try {
     const parsed = JSON.parse(result);
+    debugLog("generateWeeklyPlan 解析成功", { weeksCount: parsed.weeks?.length });
     return { weeks: parsed.weeks || [] };
-  } catch {
+  } catch (err) {
+    debugLogError("generateWeeklyPlan JSON解析失败", { rawResponse: result.slice(0, 500), error: err });
     throw new Error("AI返回的周计划数据格式不正确");
   }
 }
@@ -712,23 +832,92 @@ export async function generateDailyPlan(
     review: boolean;
   }>;
 }> {
-  const systemPrompt = `你是一个科学的学习计划生成AI。请根据周计划和知识树节点，生成每天的具体学习计划。
+  // 分批生成日计划，每批最多7天，避免超时
+  const BATCH_SIZE = 7;
+  const allDays: Array<{
+    day: number;
+    date: string;
+    week: number;
+    month: number;
+    subject: string;
+    knowledgeNodes: string[];
+    estimatedMinutes: number;
+    focus: string;
+    review: boolean;
+  }> = [];
+
+  const totalBatches = Math.ceil(daysCount / BATCH_SIZE);
+  debugLog("generateDailyPlan 开始分批生成", { totalDays: daysCount, batchSize: BATCH_SIZE, totalBatches });
+
+  for (let batch = 0; batch < totalBatches; batch++) {
+    const startDay = batch * BATCH_SIZE + 1;
+    const endDay = Math.min((batch + 1) * BATCH_SIZE, daysCount);
+    const batchDays = endDay - startDay + 1;
+
+    debugLog(`generateDailyPlan 批次 ${batch + 1}/${totalBatches}`, { startDay, endDay, batchDays });
+
+    const batchResult = await generateDailyPlanBatch(
+      subjects,
+      dailyMinutes,
+      startDate,
+      startDay,
+      endDay,
+      weeklyContext,
+      requirements,
+      apiKey,
+      apiUrl,
+      modelName
+    );
+
+    allDays.push(...batchResult.days);
+    debugLog(`generateDailyPlan 批次 ${batch + 1}/${totalBatches} 完成`, { batchDays: batchResult.days.length, totalSoFar: allDays.length });
+  }
+
+  debugLog("generateDailyPlan 全部完成", { totalDays: allDays.length });
+  return { days: allDays };
+}
+
+// 分批生成日计划的内部函数
+async function generateDailyPlanBatch(
+  subjects: Array<{ title: string; priority: number; difficulty: number; knowledgeNodes: Array<{ title: string; estimatedMinutes: number; difficulty: number; importance: number }> }>,
+  dailyMinutes: number,
+  startDate: string,
+  startDay: number,
+  endDay: number,
+  weeklyContext: string,
+  requirements?: string,
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  days: Array<{
+    day: number;
+    date: string;
+    week: number;
+    month: number;
+    subject: string;
+    knowledgeNodes: string[];
+    estimatedMinutes: number;
+    focus: string;
+    review: boolean;
+  }>;
+}> {
+  const systemPrompt = `你是一个科学的学习计划生成AI。请根据周计划和知识树节点，生成指定天数范围内的具体学习计划。
 
 【核心规则 - 必须严格遵守】
 1. 每天的学习内容细化到具体知识点
 2. 考虑知识点的依赖关系（前置知识优先）
 3. 高难度知识点分配更多时间
-4. **每天必须安排所有科目，每个科目作为独立的条目返回。同一天内的多个科目条目必须使用完全相同的day和date值。每个科目分配适量知识点，确保所有科目每天都有进展**
-5. **每7天安排一次回顾日（review=true）。回顾日只复习该周（最近7天内）已经学习过的知识点，不要包含尚未学习或更早周次的知识点。对于每个科目，回顾日创建一个独立条目，review=true，knowledgeNodes只包含该科目当周已学的知识点**
-6. 确保day序号从1开始连续，date从startDate开始按天递增
-7. 每个条目包含week和month字段，标识属于第几周和第几个月
-8. **必须覆盖所有科目的所有知识点，不能遗漏任何科目**
-9. 每个科目的知识点应均匀分布在整个计划中
-10. 根据dailyMinutes合理拆分时间给每个科目
+4. **每天必须安排所有科目，每个科目作为独立的条目返回。同一天内的多个科目条目必须使用完全相同的day和date值**
+5. **如果批次内包含回顾日（每7天一次），只复习该批次内已经学习过的知识点**
+6. 确保day序号从startDay开始连续到endDay
+7. 每个条目包含week和month字段
+8. **必须覆盖所有科目的知识点，不能遗漏**
+9. 根据dailyMinutes合理拆分时间给每个科目
 
 【JSON格式要求】
-- 同一天有多个科目时，返回多个条目，它们的day和date完全相同，只有subject和knowledgeNodes不同
-- 回顾日 likewise：每个科目一个条目，review=true
+- 同一天有多个科目时，返回多个条目，day和date相同，subject不同
+- 回顾日：review=true，复习该批次内已学知识点
 
 请返回JSON格式：
 {
@@ -743,40 +932,31 @@ export async function generateDailyPlan(
       "estimatedMinutes": 60,
       "focus": "今日学习重点",
       "review": false
-    },
-    {
-      "day": 1,
-      "date": "2026-06-01",
-      "week": 1,
-      "month": 1,
-      "subject": "科目B",
-      "knowledgeNodes": ["知识点3", "知识点4"],
-      "estimatedMinutes": 60,
-      "focus": "今日学习重点",
-      "review": false
     }
   ]
 }`;
 
   const subjectsInfo = subjects.map(s => {
     const nodes = s.knowledgeNodes
-      .map(n => `  - ${n.title} (预计${n.estimatedMinutes}分钟, 难度${n.difficulty}, 重要性${n.importance})`)
+      .map(n => `  - ${n.title} (预计${n.estimatedMinutes}分钟, 难度${n.difficulty})`)
       .join("\n");
     return `- ${s.title}:\n${nodes}`;
   }).join("\n\n");
 
-  const userPrompt = `请生成${daysCount}天的详细日计划：
+  const userPrompt = `请生成第${startDay}天到第${endDay}天的详细日计划：
 
 科目及知识点：
 ${subjectsInfo}
 
 每日可用时间：${dailyMinutes}分钟
 开始日期：${startDate}
+当前批次：第${startDay}天到第${endDay}天
 
 周计划概览：
 ${weeklyContext}
 ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
 
+  debugLog("generateDailyPlanBatch 开始调用AI", { startDay, endDay, promptLength: userPrompt.length });
   const result = await chatWithAI(
     [
       { role: "system", content: systemPrompt },
@@ -786,13 +966,16 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
     apiKey,
     apiUrl,
     modelName,
-    true
+    true,
+    `generateDailyPlanBatch-${startDay}-${endDay}`
   );
 
   try {
     const parsed = JSON.parse(result);
+    debugLog("generateDailyPlanBatch 解析成功", { daysCount: parsed.days?.length });
     return { days: parsed.days || [] };
-  } catch {
+  } catch (err) {
+    debugLogError("generateDailyPlanBatch JSON解析失败", { rawResponse: result.slice(0, 500), error: err });
     throw new Error("AI返回的日计划数据格式不正确");
   }
 }
@@ -1808,5 +1991,549 @@ ${localNodes ? JSON.stringify(localNodes.map(n => ({ id: n.id, title: n.title, s
     };
   } catch {
     throw new Error("AI返回的试卷分析数据格式不正确");
+  }
+}
+
+// ========== 从文件生成完整复习计划（优化版） ==========
+
+export async function generateCompleteStudyPlanFromFile(
+  fileUrl: string,
+  config: {
+    dailyMinutes: number;
+    startDate: string;
+    totalMonths: number;
+    reviewRounds: number;
+    requirements?: string;
+  },
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  rounds: Array<{
+    round: number;
+    name: string;
+    focus: string;
+    strategy: string;
+    months: number[];
+  }>;
+  months: Array<{
+    month: number;
+    monthName: string;
+    round: number;
+    focus: string;
+    subjects: string[];
+    goals: string[];
+  }>;
+  weeks: Array<{
+    week: number;
+    month: number;
+    focus: string;
+    subjects: string[];
+    knowledgeNodes: string[];
+    goals: string[];
+  }>;
+  days: Array<{
+    day: number;
+    date: string;
+    week: number;
+    month: number;
+    subject: string;
+    knowledgeNodes: string[];
+    estimatedMinutes: number;
+    focus: string;
+    review: boolean;
+  }>;
+}> {
+  const systemPrompt = `你是一个顶级的学习规划AI。请根据用户提供的科目和知识树数据文件，设计完整的复习计划。
+
+【任务要求】
+请一次性生成完整的复习计划，包含以下四个层次：
+
+1. **轮次计划**：将总时长划分为多个复习轮次，每轮有明确的策略
+2. **月计划**：每个月的学习重点、科目和目标
+3. **周计划**：每周的学习安排，细化到知识点
+4. **日计划**：每天的具体学习任务，细化到每个科目的知识点
+
+【核心规则】
+1. 每天必须安排所有科目，每个科目作为独立条目
+2. 同一天内的多个科目条目使用相同的day和date
+3. 每7天安排一次回顾日（review=true），复习该周已学知识点
+4. 确保所有科目的所有知识点都被覆盖，不能遗漏
+5. 高难度知识点分配更多时间
+6. 考虑知识点依赖关系（前置知识优先）
+
+请返回JSON格式：
+{
+  "rounds": [...],
+  "months": [...],
+  "weeks": [...],
+  "days": [...]
+}`;
+
+  const userPrompt = `请根据文件中的科目和知识树数据，生成完整的复习计划：
+
+配置信息：
+- 每日可用时间：${config.dailyMinutes}分钟
+- 开始日期：${config.startDate}
+- 总时长：${config.totalMonths}个月
+- 复习轮数：${config.reviewRounds}轮
+${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
+
+科目和知识树数据请从提供的文件中读取。`;
+
+  debugLog("generateCompleteStudyPlanFromFile 开始调用AI", { fileUrl, config });
+
+  const contentBlocks: KimiContent[] = [
+    { type: "file_url", file_url: { url: fileUrl } },
+    { type: "text", text: userPrompt }
+  ];
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: contentBlocks },
+  ];
+
+  const result = await chatWithAI(
+    messages,
+    0.6,
+    apiKey,
+    apiUrl,
+    modelName,
+    true,
+    "generateCompleteStudyPlanFromFile"
+  );
+
+  try {
+    const jsonStr = extractJsonFromResponse(result);
+    const parsed = JSON.parse(jsonStr);
+    debugLog("generateCompleteStudyPlanFromFile 解析成功", {
+      roundsCount: parsed.rounds?.length,
+      monthsCount: parsed.months?.length,
+      weeksCount: parsed.weeks?.length,
+      daysCount: parsed.days?.length
+    });
+    return {
+      rounds: parsed.rounds || [],
+      months: parsed.months || [],
+      weeks: parsed.weeks || [],
+      days: parsed.days || [],
+    };
+  } catch (err) {
+    debugLogError("generateCompleteStudyPlanFromFile JSON解析失败", { rawResponse: result.slice(0, 500), error: err });
+    throw new Error("AI返回的计划数据格式不正确");
+  }
+}
+// 从文件生成轮次和月计划
+export async function generateRoundAndMonthlyPlanFromFile(
+  fileUrl: string,
+  config: {
+    dailyMinutes: number;
+    startDate: string;
+    totalMonths: number;
+    reviewRounds: number;
+    requirements?: string;
+  },
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  rounds: Array<{
+    round: number;
+    name: string;
+    focus: string;
+    strategy: string;
+    months: number[];
+  }>;
+  months: Array<{
+    month: number;
+    monthName: string;
+    round: number;
+    focus: string;
+    subjects: string[];
+    goals: string[];
+  }>;
+}> {
+  const systemPrompt = `你是一个顶级的学习规划AI。请根据文件中的科目和知识树数据，设计复习轮次计划和月计划。
+
+要求：
+1. 将总时长划分为指定轮次的复习，每轮有明确策略
+2. 第一轮学习新知识，后续轮次侧重复习
+3. 每月列出重点科目和目标
+4. 高优先级/基础科目优先安排
+
+请返回JSON格式：
+{
+  "rounds": [{"round":1,"name":"第一轮","focus":"...","strategy":"...","months":[1,2]}],
+  "months": [{"month":1,"monthName":"第1个月","round":1,"focus":"...","subjects":["科目1"],"goals":["目标1"]}]
+}`;
+
+  const userPrompt = `请生成${config.reviewRounds}轮复习、共${config.totalMonths}个月的轮次和月计划：
+
+- 每日可用时间：${config.dailyMinutes}分钟
+- 开始日期：${config.startDate}
+${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
+
+科目和知识树数据请从提供的文件中读取。`;
+
+  debugLog("generateRoundAndMonthlyPlanFromFile 开始调用AI", { fileUrl, config });
+
+  const contentBlocks: KimiContent[] = [
+    { type: "file_url", file_url: { url: fileUrl } },
+    { type: "text", text: userPrompt }
+  ];
+
+  debugLog("generateRoundAndMonthlyPlanFromFile 请求内容", {
+    systemPromptLength: systemPrompt.length,
+    userPromptLength: userPrompt.length,
+    contentBlocksCount: contentBlocks.length
+  });
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: contentBlocks },
+  ];
+
+  const result = await chatWithAI(
+    messages,
+    0.6,
+    apiKey,
+    apiUrl,
+    modelName,
+    true,
+    "generateRoundAndMonthlyPlanFromFile"
+  );
+
+  debugLog("generateRoundAndMonthlyPlanFromFile 收到AI响应", {
+    resultLength: result.length,
+    first500Chars: result.slice(0, 500)
+  });
+
+  try {
+    const jsonStr = extractJsonFromResponse(result);
+    const parsed = JSON.parse(jsonStr);
+    debugLog("generateRoundAndMonthlyPlanFromFile 解析成功", {
+      roundsCount: parsed.rounds?.length,
+      monthsCount: parsed.months?.length,
+      sampleRounds: parsed.rounds?.slice(0, 2),
+      sampleMonths: parsed.months?.slice(0, 2)
+    });
+    return {
+      rounds: parsed.rounds || [],
+      months: parsed.months || [],
+    };
+  } catch (err) {
+    debugLogError("generateRoundAndMonthlyPlanFromFile JSON解析失败", { error: err, result: result.slice(0, 2000) });
+    throw new Error("AI返回的轮次/月计划数据格式不正确");
+  }
+}
+
+// 从文件生成周计划
+export async function generateWeeklyPlanFromFile(
+  fileUrl: string,
+  config: {
+    dailyMinutes: number;
+    totalWeeks: number;
+    monthlyContext: string;
+    requirements?: string;
+  },
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  weeks: Array<{
+    week: number;
+    month: number;
+    focus: string;
+    subjects: string[];
+    knowledgeNodes: string[];
+    goals: string[];
+  }>;
+}> {
+  const systemPrompt = `你是一个科学的学习计划生成AI。请根据文件中的科目和知识树数据，以及月计划概览，生成每周的学习计划。
+
+要求：
+1. 将学习内容细化到周级别
+2. 每周有明确的主题和知识点安排
+3. 考虑知识点依赖关系
+4. 每周聚焦1-2个科目
+
+请返回JSON格式：
+{
+  "weeks": [{"week":1,"month":1,"focus":"...","subjects":["科目1"],"knowledgeNodes":["知识点1"],"goals":["目标1"]}]
+}`;
+
+  const userPrompt = `请生成${config.totalWeeks}周的周计划：
+
+每日可用时间：${config.dailyMinutes}分钟
+
+月计划概览：
+${config.monthlyContext}
+${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
+
+科目和知识树数据请从提供的文件中读取。`;
+
+  debugLog("generateWeeklyPlanFromFile 开始调用AI", { fileUrl, totalWeeks: config.totalWeeks });
+
+  debugLog("generateWeeklyPlanFromFile 请求内容", {
+    systemPromptLength: systemPrompt.length,
+    userPromptLength: userPrompt.length,
+    monthlyContextLength: config.monthlyContext?.length || 0
+  });
+
+  const contentBlocks: KimiContent[] = [
+    { type: "file_url", file_url: { url: fileUrl } },
+    { type: "text", text: userPrompt }
+  ];
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: contentBlocks },
+  ];
+
+  const result = await chatWithAI(
+    messages,
+    0.6,
+    apiKey,
+    apiUrl,
+    modelName,
+    true,
+    "generateWeeklyPlanFromFile"
+  );
+
+  debugLog("generateWeeklyPlanFromFile 收到AI响应", {
+    resultLength: result.length,
+    first500Chars: result.slice(0, 500)
+  });
+
+  try {
+    const jsonStr = extractJsonFromResponse(result);
+    const parsed = JSON.parse(jsonStr);
+    debugLog("generateWeeklyPlanFromFile 解析成功", {
+      weeksCount: parsed.weeks?.length,
+      sampleWeeks: parsed.weeks?.slice(0, 3)
+    });
+    return { weeks: parsed.weeks || [] };
+  } catch (err) {
+    debugLogError("generateWeeklyPlanFromFile JSON解析失败", { error: err, result: result.slice(0, 2000) });
+    throw new Error("AI返回的周计划数据格式不正确");
+  }
+}
+
+// 从文件生成日计划（分批）
+export async function generateDailyPlanFromFile(
+  fileUrl: string,
+  config: {
+    dailyMinutes: number;
+    startDate: string;
+    totalDays: number;
+    weeklyContext: string;
+    requirements?: string;
+  },
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  days: Array<{
+    day: number;
+    date: string;
+    week: number;
+    month: number;
+    subject: string;
+    knowledgeNodes: string[];
+    estimatedMinutes: number;
+    focus: string;
+    review: boolean;
+  }>;
+}> {
+  // 分批生成，每批14天
+  const BATCH_SIZE = 14;
+  const allDays: Array<{
+    day: number;
+    date: string;
+    week: number;
+    month: number;
+    subject: string;
+    knowledgeNodes: string[];
+    estimatedMinutes: number;
+    focus: string;
+    review: boolean;
+  }> = [];
+
+  const totalBatches = Math.ceil(config.totalDays / BATCH_SIZE);
+  debugLog("generateDailyPlanFromFile 开始分批生成", { totalDays: config.totalDays, batchSize: BATCH_SIZE, totalBatches });
+
+  for (let batch = 0; batch < totalBatches; batch++) {
+    const startDay = batch * BATCH_SIZE + 1;
+    const endDay = Math.min((batch + 1) * BATCH_SIZE, config.totalDays);
+
+    debugLog(`generateDailyPlanFromFile 批次 ${batch + 1}/${totalBatches}`, { startDay, endDay });
+
+    const systemPrompt = `你是一个科学的学习计划生成AI。请根据文件中的科目和知识树数据，生成指定天数范围的日计划。
+
+【核心规则】
+1. 每天必须安排所有科目，每个科目独立条目
+2. 同一天多个科目使用相同的day和date
+3. 每7天一次回顾日（review=true），复习该批次内已学知识点
+4. 确保day序号从startDay连续到endDay
+5. 覆盖所有科目的知识点
+
+请返回JSON格式：
+{
+  "days": [{"day":1,"date":"2026-06-01","week":1,"month":1,"subject":"科目A","knowledgeNodes":["知识点1"],"estimatedMinutes":60,"focus":"...","review":false}]
+}`;
+
+    const userPrompt = `请生成第${startDay}天到第${endDay}天的日计划：
+
+- 每日可用时间：${config.dailyMinutes}分钟
+- 开始日期：${config.startDate}
+
+周计划概览：
+${config.weeklyContext}
+${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
+
+科目和知识树数据请从提供的文件中读取。`;
+
+    debugLog(`generateDailyPlanFromFile 批次 ${batch + 1}/${totalBatches} 请求内容`, {
+      systemPromptLength: systemPrompt.length,
+      userPromptLength: userPrompt.length
+    });
+
+    const contentBlocks: KimiContent[] = [
+      { type: "file_url", file_url: { url: fileUrl } },
+      { type: "text", text: userPrompt }
+    ];
+
+    const messages: KimiMessage[] = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: contentBlocks },
+    ];
+
+    const result = await chatWithAI(
+      messages,
+      0.6,
+      apiKey,
+      apiUrl,
+      modelName,
+      true,
+      `generateDailyPlanFromFile-${startDay}-${endDay}`
+    );
+
+    debugLog(`generateDailyPlanFromFile 批次 ${batch + 1}/${totalBatches} 收到AI响应`, {
+      resultLength: result.length,
+      first300Chars: result.slice(0, 300)
+    });
+
+    try {
+      const jsonStr = extractJsonFromResponse(result);
+      debugLog(`generateDailyPlanFromFile 批次 ${batch + 1}/${totalBatches} 提取JSON`, { jsonStrLength: jsonStr.length });
+      const parsed = JSON.parse(jsonStr);
+      const batchDays = parsed.days || [];
+      allDays.push(...batchDays);
+      debugLog(`generateDailyPlanFromFile 批次 ${batch + 1}/${totalBatches} 完成`, { batchDays: batchDays.length, totalSoFar: allDays.length, sample: batchDays.slice(0, 2) });
+    } catch (err) {
+      debugLogError(`generateDailyPlanFromFile 批次 ${batch + 1}/${totalBatches} 解析失败`, { error: err, result: result.slice(0, 2000) });
+      throw new Error("AI返回的日计划数据格式不正确");
+    }
+  }
+
+  debugLog("generateDailyPlanFromFile 全部完成", { totalDays: allDays.length });
+  return { days: allDays };
+}
+
+// 为单周生成日计划（7天）
+export async function generateWeeklyDailyPlanFromFile(
+  fileUrl: string,
+  config: {
+    dailyMinutes: number;
+    startDate: string;
+    weekNumber: number;
+    weeklyContext: string;
+    requirements?: string;
+  },
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  days: Array<{
+    day: number;
+    date: string;
+    week: number;
+    month: number;
+    subject: string;
+    knowledgeNodes: string[];
+    estimatedMinutes: number;
+    focus: string;
+    review: boolean;
+  }>;
+}> {
+  const DAYS_PER_WEEK = 7;
+  const startDay = (config.weekNumber - 1) * DAYS_PER_WEEK + 1;
+  const endDay = config.weekNumber * DAYS_PER_WEEK;
+
+  debugLog("generateWeeklyDailyPlanFromFile 开始", { weekNumber: config.weekNumber, startDay, endDay });
+
+  const systemPrompt = `你是一个科学的学习计划生成AI。请根据文件中的科目和知识树数据，以及周计划概览，生成${config.weekNumber}周的7天详细日计划。
+
+【核心规则】
+1. 每天必须安排所有科目，每个科目作为独立条目
+2. 同一天内不同科目使用相同的day和date
+3. 周日设为回顾日（review=true），复习本周所学
+4. 确保day序号从${startDay}到${endDay}
+5. 覆盖周计划中的所有知识点
+
+请返回JSON格式：
+{
+  "days": [{"day":${startDay},"date":"YYYY-MM-DD","week":${config.weekNumber},"month":1,"subject":"科目A","knowledgeNodes":["知识点1"],"estimatedMinutes":60,"focus":"...","review":false}]
+}`;
+
+  const userPrompt = `请生成第${config.weekNumber}周（第${startDay}-${endDay}天）的详细日计划：
+
+- 每日可用时间：${config.dailyMinutes}分钟
+- 开始日期：${config.startDate}
+
+周计划概览：
+${config.weeklyContext}
+${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
+
+科目和知识树数据请从提供的文件中读取。`;
+
+  const contentBlocks: KimiContent[] = [
+    { type: "file_url", file_url: { url: fileUrl } },
+    { type: "text", text: userPrompt }
+  ];
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: contentBlocks },
+  ];
+
+  const result = await chatWithAI(
+    messages,
+    0.6,
+    apiKey,
+    apiUrl,
+    modelName,
+    true,
+    `generateWeeklyDailyPlanFromFile-week${config.weekNumber}`
+  );
+
+  debugLog("generateWeeklyDailyPlanFromFile 收到AI响应", {
+    resultLength: result.length,
+    first300Chars: result.slice(0, 300)
+  });
+
+  try {
+    const jsonStr = extractJsonFromResponse(result);
+    const parsed = JSON.parse(jsonStr);
+    const days = parsed.days || [];
+    debugLog("generateWeeklyDailyPlanFromFile 解析成功", {
+      weekNumber: config.weekNumber,
+      daysCount: days.length,
+      sample: days.slice(0, 2)
+    });
+    return { days };
+  } catch (err) {
+    debugLogError("generateWeeklyDailyPlanFromFile JSON解析失败", { error: err, result: result.slice(0, 2000) });
+    throw new Error("AI返回的日计划数据格式不正确");
   }
 }
