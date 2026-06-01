@@ -29,6 +29,7 @@ import {
   Upload,
   FileText,
   X,
+  Trophy,
 } from "lucide-react";
 
 interface TestQuestion {
@@ -61,6 +62,16 @@ export default function Todos() {
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
+
+  // 复习任务AI考官状态
+  const [reviewTestOpen, setReviewTestOpen] = useState(false);
+  const [activeReviewId, setActiveReviewId] = useState<number | null>(null);
+  const [reviewTestQuestions, setReviewTestQuestions] = useState<TestQuestion[]>([]);
+  const [reviewTestAnswers, setReviewTestAnswers] = useState<Record<string, string>>({});
+  const [reviewTestStep, setReviewTestStep] = useState<"loading" | "testing" | "result" | "select-source">("select-source");
+  const [reviewTestResult, setReviewTestResult] = useState<any>(null);
+  const [reviewTestQuestionType, setReviewTestQuestionType] = useState<"single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed">("mixed");
+  const [reviewTestQuestionCount, setReviewTestQuestionCount] = useState(5);
 
   const questionTypeMap: Record<string, string> = {
     single_choice: "单选题",
@@ -141,6 +152,34 @@ export default function Todos() {
       utils.todo.getToday.invalidate();
       utils.todo.getReviews.invalidate();
       utils.todo.list.invalidate();
+    },
+    onError: (err) => {
+      alert(err.message);
+    },
+  });
+
+  // 复习任务AI考官API
+  const generateReviewTest = trpc.todo.generateReviewTest.useMutation({
+    onSuccess: (data) => {
+      setReviewTestQuestions(data.questions);
+      setReviewTestAnswers({});
+      setReviewTestStep("testing");
+      toast.success(data.source === "database" ? `从题库匹配 ${data.questions.length} 道题目` : `AI生成 ${data.questions.length} 道题目`);
+    },
+    onError: (err) => {
+      setReviewTestOpen(false);
+      alert(err.message);
+    },
+  });
+
+  const submitReviewTest = trpc.todo.submitReviewTest.useMutation({
+    onSuccess: (data) => {
+      setReviewTestResult(data);
+      setReviewTestStep("result");
+      utils.todo.getReviews.invalidate();
+      utils.knowledge.list.invalidate();
+      utils.skill.list.invalidate();
+      toast.success(`复习完成！掌握度更新为 ${data.mastery}%`);
     },
     onError: (err) => {
       alert(err.message);
@@ -472,7 +511,20 @@ export default function Todos() {
                       <p className="text-xs text-muted-foreground mt-1">掌握度 {rev.mastery}%</p>
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2">首次学习：{rev.originalStudyDate} · 间隔 {rev.intervalDays} 天</p>
+                  <div className="flex items-center justify-between mt-3">
+                    <p className="text-xs text-muted-foreground">首次学习：{rev.originalStudyDate} · 间隔 {rev.intervalDays} 天</p>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setActiveReviewId(rev.id);
+                        setReviewTestStep("select-source");
+                        setReviewTestOpen(true);
+                      }}
+                    >
+                      <BrainCircuit className="h-4 w-4 mr-1" />
+                      AI考官
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))
@@ -844,6 +896,231 @@ export default function Todos() {
               </div>
 
               <Button className="w-full" onClick={() => { setTestOpen(false); setTestResult(null); }}>
+                完成
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 复习任务AI考官弹窗 */}
+      <Dialog open={reviewTestOpen} onOpenChange={setReviewTestOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BrainCircuit className="h-5 w-5 text-primary" />
+              复习测试 - AI考官
+            </DialogTitle>
+          </DialogHeader>
+
+          {reviewTestStep === "select-source" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">配置复习测试：</p>
+
+              {/* 题目类型和数量设置 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">题目类型</label>
+                  <select
+                    value={reviewTestQuestionType}
+                    onChange={(e) => setReviewTestQuestionType(e.target.value as any)}
+                    className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm"
+                  >
+                    <option value="single_choice">单选题</option>
+                    <option value="multiple_choice">多选题</option>
+                    <option value="fill_blank">填空题</option>
+                    <option value="short_answer">简答题</option>
+                    <option value="essay">论述题</option>
+                    <option value="mixed">混合题型</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">题目数量</label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={reviewTestQuestionCount}
+                      onChange={(e) => setReviewTestQuestionCount(parseInt(e.target.value) || 5)}
+                      className="flex-1"
+                    />
+                    <span className="text-sm text-muted-foreground">道</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    if (activeReviewId) {
+                      setReviewTestStep("loading");
+                      generateReviewTest.mutate({
+                        reviewId: activeReviewId,
+                        questionType: reviewTestQuestionType,
+                        count: reviewTestQuestionCount,
+                      });
+                    }
+                  }}
+                >
+                  开始复习测试
+                </Button>
+                <Button variant="outline" onClick={() => setReviewTestOpen(false)}>
+                  取消
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {reviewTestStep === "loading" && (
+            <div className="text-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+              <p className="text-muted-foreground">AI正在出题...</p>
+            </div>
+          )}
+
+          {reviewTestStep === "testing" && (
+            <div className="space-y-4">
+              {reviewTestQuestions.map((q, idx) => {
+                const isMultiple = q.questionType === "multiple_choice";
+                const currentAnswer = reviewTestAnswers[q.id] || "";
+                const selectedLabels = isMultiple
+                  ? currentAnswer.split("").filter(Boolean)
+                  : [currentAnswer].filter(Boolean);
+
+                const toggleOption = (label: string) => {
+                  if (isMultiple) {
+                    const newLabels = selectedLabels.includes(label)
+                      ? selectedLabels.filter((l) => l !== label)
+                      : [...selectedLabels, label].sort();
+                    setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: newLabels.join("") });
+                  } else {
+                    setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: label });
+                  }
+                };
+
+                return (
+                  <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
+                    <p className="text-sm font-medium mb-2">
+                      <span className="text-primary mr-1">{idx + 1}.</span>
+                      {q.content}
+                    </p>
+                    {isMultiple && (
+                      <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
+                        <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
+                        多选题：可选择多个答案
+                      </p>
+                    )}
+                    {q.options && q.options.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {q.options.map((opt: any) => {
+                          const isSelected = selectedLabels.includes(opt.label);
+                          return (
+                            <button
+                              key={opt.label}
+                              onClick={() => toggleOption(opt.label)}
+                              className={`w-full text-left p-2 rounded-lg border text-sm transition-colors ${
+                                isSelected
+                                  ? "border-primary bg-primary/10"
+                                  : "border-border hover:bg-secondary/30"
+                              }`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <span className={`font-medium mr-2 ${isSelected ? "text-primary" : ""}`}>
+                                  {isMultiple && (
+                                    <span className={`inline-flex items-center justify-center w-4 h-4 border rounded mr-1 ${isSelected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground"}`}>
+                                      {isSelected && "✓"}
+                                    </span>
+                                  )}
+                                  {opt.label}.
+                                </span>
+                                <span className="flex-1">{opt.text}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <textarea
+                        className="w-full p-2 rounded-lg border border-border bg-background text-sm min-h-[80px]"
+                        placeholder="请输入答案..."
+                        value={reviewTestAnswers[q.id] || ""}
+                        onChange={(e) => setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: e.target.value })}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    if (activeReviewId) {
+                      setReviewTestStep("loading");
+                      submitReviewTest.mutate({
+                        reviewId: activeReviewId,
+                        questions: reviewTestQuestions,
+                        answers: Object.entries(reviewTestAnswers).map(([questionId, userAnswer]) => ({
+                          questionId,
+                          userAnswer,
+                        })),
+                      });
+                    }
+                  }}
+                  disabled={reviewTestQuestions.some(q => !reviewTestAnswers[q.id])}
+                >
+                  提交答案
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {reviewTestStep === "result" && reviewTestResult && (
+            <div className="space-y-4">
+              <div className="text-center py-4">
+                <Trophy className="h-12 w-12 text-yellow-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold">{reviewTestResult.mastery}%</p>
+                <p className="text-sm text-muted-foreground">掌握度</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  上次: {reviewTestResult.previousMastery}% → 本次: {reviewTestResult.newMastery}% → 综合: {reviewTestResult.mastery}%
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-center">
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-lg font-bold">{reviewTestResult.reviewCount}</p>
+                  <p className="text-xs text-muted-foreground">已复习次数</p>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-lg font-bold">{reviewTestResult.nextReviewIn}天</p>
+                  <p className="text-xs text-muted-foreground">下次复习</p>
+                </div>
+              </div>
+
+              {reviewTestResult.status === "mastered" && (
+                <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                  <p className="text-sm text-green-400 font-medium flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    恭喜！该知识点已标记为已掌握
+                  </p>
+                </div>
+              )}
+
+              {reviewTestResult.suggestions && reviewTestResult.suggestions.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">AI建议</p>
+                  {reviewTestResult.suggestions.map((s: string, i: number) => (
+                    <p key={i} className="text-xs text-muted-foreground flex items-start gap-1">
+                      <span className="text-primary mt-0.5">•</span>
+                      {s}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              <Button className="w-full" onClick={() => { setReviewTestOpen(false); setReviewTestResult(null); }}>
                 完成
               </Button>
             </div>

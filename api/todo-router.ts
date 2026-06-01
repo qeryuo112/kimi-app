@@ -956,4 +956,290 @@ export const todoRouter = createRouter({
         .orderBy(desc(dailyTodos.date))
         .limit(input?.limit || 30);
     }),
+
+  // 生成复习任务测试题（AI考官）
+  generateReviewTest: authedQuery
+    .input(
+      z.object({
+        reviewId: z.number(),
+        questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
+        count: z.number().min(1).max(20).default(5),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [review] = await db
+        .select()
+        .from(reviewSchedules)
+        .where(and(eq(reviewSchedules.id, input.reviewId), eq(reviewSchedules.userId, ctx.user.id)));
+
+      if (!review) throw new Error("复习任务不存在");
+
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      // 根据复习次数和掌握度调整出题难度
+      // 复习次数越多，题目越难；掌握度越低，题目越基础
+      const _difficultyLevel = review.reviewCount >= 3 ? "hard" : review.reviewCount >= 1 ? "medium" : "mixed";
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      void _difficultyLevel;
+
+      // 智能选题：先从题库中找相关题目
+      const allQuestions = await db
+        .select()
+        .from(questions)
+        .where(eq(questions.userId, ctx.user.id));
+
+      // 根据知识点标题匹配题目
+      const matchedQuestions = allQuestions.filter((q) => {
+        // 匹配 detectedKnowledgePoint
+        if (q.detectedKnowledgePoint) {
+          return review.nodeTitle.toLowerCase().includes(q.detectedKnowledgePoint.toLowerCase()) ||
+            q.detectedKnowledgePoint.toLowerCase().includes(review.nodeTitle.toLowerCase());
+        }
+        return false;
+      });
+
+      // 如果题库中有足够题目，直接使用
+      if (matchedQuestions.length >= input.count) {
+        const shuffled = matchedQuestions.sort(() => 0.5 - Math.random());
+        const selected = shuffled.slice(0, input.count);
+
+        return {
+          questions: selected.map((q) => ({
+            id: `q-${q.id}`,
+            content: q.content,
+            options: q.options ? JSON.parse(q.options) : undefined,
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation || "",
+            knowledgePoint: review.nodeTitle,
+            questionType: q.questionType,
+          })),
+          source: "database",
+          reviewInfo: {
+            nodeTitle: review.nodeTitle,
+            subjectTitle: review.subjectTitle,
+            reviewCount: review.reviewCount,
+            currentMastery: review.mastery,
+          },
+        };
+      }
+
+      // 题库题目不够，调用 AI 生成
+      const result = await generateTodoTestQuestions(
+        review.subjectTitle,
+        [review.nodeTitle],
+        input.questionType,
+        input.count,
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
+
+      // 将AI生成的题目保存到题库
+      const savedQuestionIds: number[] = [];
+      for (const q of result.questions) {
+        const [{ id }] = await db
+          .insert(questions)
+          .values({
+            userId: ctx.user.id,
+            questionType: (q.questionType || input.questionType) as "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed",
+            content: q.content,
+            options: q.options ? JSON.stringify(q.options) : null,
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation,
+            difficulty: 3,
+            aiGenerated: true,
+            detectedSubject: review.subjectTitle,
+            detectedKnowledgePoint: review.nodeTitle,
+          })
+          .$returningId();
+        savedQuestionIds.push(id);
+      }
+
+      return {
+        questions: result.questions.map((q, idx) => ({
+          ...q,
+          id: `ai-${savedQuestionIds[idx]}`,
+        })),
+        source: "ai",
+        reviewInfo: {
+          nodeTitle: review.nodeTitle,
+          subjectTitle: review.subjectTitle,
+          reviewCount: review.reviewCount,
+          currentMastery: review.mastery,
+        },
+      };
+    }),
+
+  // 提交复习测试答案并更新掌握度
+  submitReviewTest: authedQuery
+    .input(
+      z.object({
+        reviewId: z.number(),
+        questions: z.array(
+          z.object({
+            id: z.string(),
+            content: z.string(),
+            correctAnswer: z.string(),
+            explanation: z.string(),
+            knowledgePoint: z.string(),
+            questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).optional(),
+          })
+        ),
+        answers: z.array(
+          z.object({
+            questionId: z.string(),
+            userAnswer: z.string(),
+          })
+        ),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [review] = await db
+        .select()
+        .from(reviewSchedules)
+        .where(and(eq(reviewSchedules.id, input.reviewId), eq(reviewSchedules.userId, ctx.user.id)));
+
+      if (!review) throw new Error("复习任务不存在");
+
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      // 区分选择题和非选择题
+      const choiceQuestions = input.questions.filter(q =>
+        q.questionType === "single_choice" || q.questionType === "multiple_choice"
+      );
+      const otherQuestions = input.questions.filter(q =>
+        q.questionType !== "single_choice" && q.questionType !== "multiple_choice"
+      );
+
+      // 选择题本地判断
+      let correctCount = 0;
+      for (const q of choiceQuestions) {
+        const ans = input.answers.find(a => a.questionId === q.id);
+        if (ans) {
+          let userAns = ans.userAnswer.trim().toUpperCase();
+          let correctAns = q.correctAnswer.trim().toUpperCase();
+
+          // 多选题：排序后比较
+          if (q.questionType === "multiple_choice") {
+            userAns = userAns.split("").sort().join("");
+            correctAns = correctAns.split("").sort().join("");
+          }
+
+          if (userAns === correctAns) {
+            correctCount++;
+          }
+        }
+      }
+
+      // 非选择题需要AI评估
+      let aiEvaluation: any = null;
+      if (otherQuestions.length > 0) {
+        const otherAnswers = input.answers.filter(a =>
+          otherQuestions.some(q => q.id === a.questionId)
+        );
+        aiEvaluation = await evaluateTodoTestAnswers(
+          review.subjectTitle,
+          [review.nodeTitle],
+          otherQuestions,
+          otherAnswers,
+          setting?.aiApiKey || undefined,
+          setting?.aiApiEndpoint || undefined,
+          setting?.aiModel || undefined
+        );
+      }
+
+      // 计算总掌握度
+      const totalQuestions = input.questions.length;
+      let newMastery = 0;
+
+      if (choiceQuestions.length > 0 && otherQuestions.length === 0) {
+        newMastery = Math.round((correctCount / totalQuestions) * 100);
+      } else if (choiceQuestions.length === 0 && otherQuestions.length > 0) {
+        newMastery = aiEvaluation?.mastery || 0;
+      } else {
+        const choiceWeight = choiceQuestions.length / totalQuestions;
+        const otherWeight = otherQuestions.length / totalQuestions;
+        const choiceMastery = Math.round((correctCount / choiceQuestions.length) * 100);
+        const otherMastery = aiEvaluation?.mastery || 0;
+        newMastery = Math.round(choiceMastery * choiceWeight + otherMastery * otherWeight);
+      }
+
+      // 综合历史掌握度（加权平均：新测试60% + 历史40%）
+      const finalMastery = Math.round(newMastery * 0.6 + review.mastery * 0.4);
+
+      // 计算下一次复习间隔
+      const newInterval = calculateNextInterval(review.intervalDays, finalMastery);
+      const nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + newInterval);
+
+      // 更新复习调度
+      const existingDates = (() => {
+        try {
+          return JSON.parse(review.reviewDates || "[]");
+        } catch {
+          return [];
+        }
+      })();
+
+      await db
+        .update(reviewSchedules)
+        .set({
+          reviewCount: review.reviewCount + 1,
+          nextReviewDate: nextDate.toISOString().split("T")[0],
+          intervalDays: newInterval,
+          mastery: finalMastery,
+          reviewDates: JSON.stringify([...existingDates, new Date().toISOString().split("T")[0]]),
+          status: finalMastery >= 95 && review.reviewCount >= 2 ? "mastered" : "active",
+        })
+        .where(eq(reviewSchedules.id, input.reviewId));
+
+      // 同步更新知识节点的掌握度
+      const knowledgeNode = await db
+        .select()
+        .from(knowledgeNodes)
+        .where(
+          and(
+            eq(knowledgeNodes.userId, ctx.user.id),
+            eq(knowledgeNodes.title, review.nodeTitle)
+          )
+        )
+        .limit(1);
+
+      if (knowledgeNode.length > 0) {
+        await db
+          .update(knowledgeNodes)
+          .set({ mastery: finalMastery })
+          .where(eq(knowledgeNodes.id, knowledgeNode[0].id));
+      }
+
+      // 构建反馈信息
+      const feedback = choiceQuestions.length > 0 && otherQuestions.length === 0
+        ? `答对 ${correctCount}/${totalQuestions} 题，掌握度更新为 ${finalMastery}%`
+        : choiceQuestions.length === 0 && otherQuestions.length > 0
+        ? `AI评估掌握度 ${newMastery}%，综合历史记录后为 ${finalMastery}%`
+        : `选择题 ${correctCount}/${choiceQuestions.length} 正确，AI评估主观题掌握度 ${aiEvaluation?.mastery || 0}%，综合掌握度 ${finalMastery}%`;
+
+      return {
+        success: true,
+        mastery: finalMastery,
+        newMastery,
+        previousMastery: review.mastery,
+        reviewCount: review.reviewCount + 1,
+        nextReviewIn: newInterval,
+        feedback,
+        suggestions: aiEvaluation?.suggestions || [],
+        weakPoints: aiEvaluation?.weakPoints || [],
+        status: finalMastery >= 95 && review.reviewCount >= 2 ? "mastered" : "active",
+      };
+    }),
 });
