@@ -473,6 +473,11 @@ export default function Questions() {
                 {difficultyMap[q.difficulty]?.label || `难度${q.difficulty}`}
               </Badge>
               <Badge variant="outline">{questionTypeMap[q.questionType] || q.questionType}</Badge>
+              {q.questionType === "multiple_choice" && (
+                <Badge variant="secondary" className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
+                  多选
+                </Badge>
+              )}
               {q.aiGenerated && (
                 <Badge variant="outline" className="bg-primary/10">
                   <Sparkles className="h-3 w-3 mr-1" />
@@ -1056,6 +1061,11 @@ export default function Questions() {
                       <div className="flex gap-2 mb-2 flex-wrap">
                         <Badge variant="outline">{questionTypeMap[q.questionType] || q.questionType}</Badge>
                         <Badge className={difficultyMap[q.difficulty]?.color || ""}>{difficultyMap[q.difficulty]?.label || `难度${q.difficulty}`}</Badge>
+                        {q.questionType === "multiple_choice" && (
+                          <Badge variant="secondary" className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs">
+                            多选
+                          </Badge>
+                        )}
                         {(q.detectedSubject || q.subjectId) && (
                           <Badge variant="secondary" className="text-xs bg-blue-500/20 text-blue-400 border-blue-500/30">
                             <BookOpen className="h-3 w-3 mr-1" />
@@ -1126,6 +1136,12 @@ export default function Questions() {
               </div>
             )}
             <p className="font-medium">{currentQuestion.content}</p>
+            {currentQuestion.questionType === "multiple_choice" && (
+              <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
+                <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
+                多选题：可选择多个答案
+              </p>
+            )}
             {currentQuestion.options && (
               <div className="space-y-2">
                 {(() => {

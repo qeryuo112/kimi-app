@@ -718,6 +718,12 @@ export default function Todos() {
                       <span className="text-primary mr-1">{idx + 1}.</span>
                       {q.content}
                     </p>
+                    {isMultiple && (
+                      <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
+                        <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
+                        多选题：可选择多个答案
+                      </p>
+                    )}
                     {q.options && q.options.length > 0 ? (
                       <div className="space-y-1.5">
                         {q.options.map((opt) => {
