@@ -492,8 +492,15 @@ export const todoRouter = createRouter({
         if (ans) {
           choiceAnswers.push(ans);
           // 本地判断：去除空格后对比
-          const userAns = ans.userAnswer.trim().toUpperCase();
-          const correctAns = q.correctAnswer.trim().toUpperCase();
+          let userAns = ans.userAnswer.trim().toUpperCase();
+          let correctAns = q.correctAnswer.trim().toUpperCase();
+
+          // 多选题：排序后比较（如 "BA" 和 "AB" 都算正确）
+          if (q.questionType === "multiple_choice") {
+            userAns = userAns.split("").sort().join("");
+            correctAns = correctAns.split("").sort().join("");
+          }
+
           if (userAns === correctAns) {
             correctCount++;
           }

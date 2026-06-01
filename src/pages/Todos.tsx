@@ -691,39 +691,73 @@ export default function Todos() {
                 <span>分钟</span>
               </div>
 
-              {testQuestions.map((q, idx) => (
-                <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
-                  <p className="text-sm font-medium mb-2">
-                    <span className="text-primary mr-1">{idx + 1}.</span>
-                    {q.content}
-                  </p>
-                  {q.options && q.options.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {q.options.map((opt) => (
-                        <button
-                          key={opt.label}
-                          onClick={() => setTestAnswers({ ...testAnswers, [q.id]: opt.label })}
-                          className={`w-full text-left p-2 rounded-lg border text-sm transition-colors ${
-                            testAnswers[q.id] === opt.label
-                              ? "border-primary bg-primary/10"
-                              : "border-border hover:bg-secondary/30"
-                          }`}
-                        >
-                          <span className="font-medium text-primary mr-2">{opt.label}.</span>
-                          {opt.text}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <Input
-                      placeholder="请输入你的答案"
-                      value={testAnswers[q.id] || ""}
-                      onChange={(e) => setTestAnswers({ ...testAnswers, [q.id]: e.target.value })}
-                    />
-                  )}
-                  <p className="text-[10px] text-muted-foreground mt-1.5">知识点：{q.knowledgePoint}</p>
-                </div>
-              ))}
+              {testQuestions.map((q, idx) => {
+                const isMultiple = q.questionType === "multiple_choice";
+                // 多选题答案解析为数组
+                const currentAnswer = testAnswers[q.id] || "";
+                const selectedLabels = isMultiple
+                  ? currentAnswer.split("").filter(Boolean)
+                  : [currentAnswer].filter(Boolean);
+
+                const toggleOption = (label: string) => {
+                  if (isMultiple) {
+                    // 多选题：切换选中状态
+                    const newLabels = selectedLabels.includes(label)
+                      ? selectedLabels.filter((l) => l !== label)
+                      : [...selectedLabels, label].sort();
+                    setTestAnswers({ ...testAnswers, [q.id]: newLabels.join("") });
+                  } else {
+                    // 单选题：直接替换
+                    setTestAnswers({ ...testAnswers, [q.id]: label });
+                  }
+                };
+
+                return (
+                  <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
+                    <p className="text-sm font-medium mb-2">
+                      <span className="text-primary mr-1">{idx + 1}.</span>
+                      {q.content}
+                    </p>
+                    {q.options && q.options.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {q.options.map((opt) => {
+                          const isSelected = selectedLabels.includes(opt.label);
+                          return (
+                            <button
+                              key={opt.label}
+                              onClick={() => toggleOption(opt.label)}
+                              className={`w-full text-left p-2 rounded-lg border text-sm transition-colors ${
+                                isSelected
+                                  ? "border-primary bg-primary/10"
+                                  : "border-border hover:bg-secondary/30"
+                              }`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <span className={`font-medium mr-2 ${isSelected ? "text-primary" : ""}`}>
+                                  {isMultiple && (
+                                    <span className={`inline-flex items-center justify-center w-5 h-5 border rounded ${isSelected ? "bg-primary border-primary text-white" : "border-border"}`}>
+                                      {isSelected && "✓"}
+                                    </span>
+                                  )}
+                                  {!isMultiple && `${opt.label}.`}
+                                </span>
+                                <span>{opt.text}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <Input
+                        placeholder="请输入你的答案"
+                        value={testAnswers[q.id] || ""}
+                        onChange={(e) => setTestAnswers({ ...testAnswers, [q.id]: e.target.value })}
+                      />
+                    )}
+                    <p className="text-[10px] text-muted-foreground mt-1.5">知识点：{q.knowledgePoint}</p>
+                  </div>
+                );
+              })}
 
               <div className="flex gap-2">
                 <Button className="flex-1" onClick={handleSubmitTest} disabled={submitTest.isPending}>
@@ -777,7 +811,17 @@ export default function Todos() {
                 <p className="text-sm font-medium">题目解析</p>
                 {testQuestions.map((q, idx) => {
                   const userAns = testAnswers[q.id] || "";
-                  const isCorrect = userAns.trim().toUpperCase() === q.correctAnswer.trim().toUpperCase();
+                  const isMultiple = q.questionType === "multiple_choice";
+                  // 多选题：排序后比较；单选题：直接比较
+                  const normalizeAnswer = (ans: string) => {
+                    const cleaned = ans.trim().toUpperCase();
+                    if (isMultiple) {
+                      // 多选题：去除逗号，排序字母
+                      return cleaned.replace(/,/g, "").split("").sort().join("");
+                    }
+                    return cleaned;
+                  };
+                  const isCorrect = normalizeAnswer(userAns) === normalizeAnswer(q.correctAnswer);
                   return (
                     <div key={q.id} className={`p-2 rounded text-sm ${isCorrect ? "bg-green-500/5" : "bg-red-500/5"}`}>
                       <div className="flex items-center gap-2">

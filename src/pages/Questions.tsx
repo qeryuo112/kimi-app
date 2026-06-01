@@ -1131,20 +1131,51 @@ export default function Questions() {
                 {(() => {
                   try {
                     const opts = JSON.parse(currentQuestion.options);
-                    return opts.map((opt: any) => (
-                      <button
-                        key={opt.label}
-                        onClick={() => setUserAnswer(opt.label)}
-                        className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                          userAnswer === opt.label
-                            ? "border-primary bg-primary/10"
-                            : "border-border hover:bg-secondary/30"
-                        }`}
-                      >
-                        <span className="font-medium text-primary mr-2">{opt.label}.</span>
-                        {renderLatexText(opt.text)}
-                      </button>
-                    ));
+                    const isMultiple = currentQuestion.questionType === "multiple_choice";
+                    // 多选题答案解析为数组
+                    const selectedLabels = isMultiple
+                      ? userAnswer.split("").filter(Boolean)
+                      : [userAnswer].filter(Boolean);
+
+                    const toggleOption = (label: string) => {
+                      if (isMultiple) {
+                        // 多选题：切换选中状态
+                        const newLabels = selectedLabels.includes(label)
+                          ? selectedLabels.filter((l) => l !== label)
+                          : [...selectedLabels, label].sort();
+                        setUserAnswer(newLabels.join(""));
+                      } else {
+                        // 单选题：直接替换
+                        setUserAnswer(label);
+                      }
+                    };
+
+                    return opts.map((opt: any) => {
+                      const isSelected = selectedLabels.includes(opt.label);
+                      return (
+                        <button
+                          key={opt.label}
+                          onClick={() => toggleOption(opt.label)}
+                          className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                            isSelected
+                              ? "border-primary bg-primary/10"
+                              : "border-border hover:bg-secondary/30"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <span className={`font-medium mr-2 ${isSelected ? "text-primary" : ""}`}>
+                              {isMultiple && (
+                                <span className={`inline-flex items-center justify-center w-5 h-5 border rounded ${isSelected ? "bg-primary border-primary text-white" : "border-border"}`}>
+                                  {isSelected && "✓"}
+                                </span>
+                              )}
+                              {!isMultiple && `${opt.label}.`}
+                            </span>
+                            <span>{renderLatexText(opt.text)}</span>
+                          </div>
+                        </button>
+                      );
+                    });
                   } catch {
                     return null;
                   }
