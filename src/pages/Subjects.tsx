@@ -335,6 +335,7 @@ export default function Subjects() {
                   </label>
                   <div className="grid grid-cols-2 gap-3">
                     <button
+                      type="button"
                       onClick={() => setSourceMode("text")}
                       className={`p-3 rounded-lg border text-left transition-colors ${
                         sourceMode === "text"
@@ -349,6 +350,7 @@ export default function Subjects() {
                       <p className="text-xs text-muted-foreground">粘贴目录、大纲或学习内容</p>
                     </button>
                     <button
+                      type="button"
                       onClick={() => setSourceMode("file")}
                       className={`p-3 rounded-lg border text-left transition-colors ${
                         sourceMode === "file"
