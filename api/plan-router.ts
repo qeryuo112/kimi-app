@@ -1,8 +1,20 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { plans, planSubjects, subjects, knowledgeNodes, knowledgeEdges, skillDimensions, userSettings } from "@db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import {
+  plans,
+  planSubjects,
+  subjects,
+  knowledgeNodes,
+  knowledgeEdges,
+  skillDimensions,
+  userSettings,
+  dailyTodos,
+  reviewSchedules,
+  studyLogs,
+  skillAssessments,
+} from "@db/schema";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills } from "./lib/ai";
 
 export const planRouter = createRouter({
@@ -106,17 +118,143 @@ export const planRouter = createRouter({
         .then(([p]) => p);
     }),
 
-  // 删除计划
+  // 删除计划（级联删除所有相关数据：科目、知识树、技能、任务、复习调度等）
   delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+
+      // 1. 获取该计划关联的所有科目ID
+      const planSubjectLinks = await db
+        .select({ subjectId: planSubjects.subjectId })
+        .from(planSubjects)
+        .where(eq(planSubjects.planId, input.id));
+
+      const subjectIds = planSubjectLinks.map((ps) => ps.subjectId);
+
+      // 2. 如果有关联科目，清理相关数据
+      if (subjectIds.length > 0) {
+        // 2.1 获取这些科目下的所有知识节点ID
+        const nodes = await db
+          .select({ id: knowledgeNodes.id })
+          .from(knowledgeNodes)
+          .where(
+            and(
+              eq(knowledgeNodes.userId, ctx.user.id),
+              inArray(knowledgeNodes.subjectId, subjectIds)
+            )
+          );
+
+        const nodeIds = nodes.map((n) => n.id);
+
+        // 2.2 获取这些科目下的所有技能维度ID
+        const skills = await db
+          .select({ id: skillDimensions.id })
+          .from(skillDimensions)
+          .where(
+            and(
+              eq(skillDimensions.userId, ctx.user.id),
+              inArray(skillDimensions.subjectId, subjectIds)
+            )
+          );
+
+        const skillIds = skills.map((s) => s.id);
+
+        // 2.3 删除知识边（基于知识节点）
+        if (nodeIds.length > 0) {
+          await db
+            .delete(knowledgeEdges)
+            .where(
+              and(
+                eq(knowledgeEdges.userId, ctx.user.id),
+                inArray(knowledgeEdges.sourceNodeId, nodeIds)
+              )
+            );
+        }
+
+        // 2.4 删除知识节点
+        await db
+          .delete(knowledgeNodes)
+          .where(
+            and(
+              eq(knowledgeNodes.userId, ctx.user.id),
+              inArray(knowledgeNodes.subjectId, subjectIds)
+            )
+          );
+
+        // 2.5 删除技能评估（基于技能维度）
+        if (skillIds.length > 0) {
+          await db
+            .delete(skillAssessments)
+            .where(
+              and(
+                eq(skillAssessments.userId, ctx.user.id),
+                inArray(skillAssessments.skillId, skillIds)
+              )
+            );
+        }
+
+        // 2.6 删除技能维度
+        await db
+          .delete(skillDimensions)
+          .where(
+            and(
+              eq(skillDimensions.userId, ctx.user.id),
+              inArray(skillDimensions.subjectId, subjectIds)
+            )
+          );
+
+        // 2.7 删除学习记录
+        await db
+          .delete(studyLogs)
+          .where(
+            and(
+              eq(studyLogs.userId, ctx.user.id),
+              inArray(studyLogs.subjectId, subjectIds)
+            )
+          );
+
+        // 2.8 删除科目
+        await db
+          .delete(subjects)
+          .where(
+            and(
+              eq(subjects.userId, ctx.user.id),
+              inArray(subjects.id, subjectIds)
+            )
+          );
+      }
+
+      // 3. 删除每日任务
+      await db
+        .delete(dailyTodos)
+        .where(
+          and(
+            eq(dailyTodos.userId, ctx.user.id),
+            eq(dailyTodos.planId, input.id)
+          )
+        );
+
+      // 4. 删除复习调度
+      await db
+        .delete(reviewSchedules)
+        .where(
+          and(
+            eq(reviewSchedules.userId, ctx.user.id),
+            eq(reviewSchedules.planId, input.id)
+          )
+        );
+
+      // 5. 删除计划科目关联
       await db
         .delete(planSubjects)
         .where(eq(planSubjects.planId, input.id));
+
+      // 6. 删除计划
       await db
         .delete(plans)
         .where(and(eq(plans.id, input.id), eq(plans.userId, ctx.user.id)));
+
       return { success: true };
     }),
 
