@@ -237,7 +237,13 @@ export const todoRouter = createRouter({
 
   // 生成测试题（AI考官出题，数量和题型由AI自主决定）
   generateTest: authedQuery
-    .input(z.object({ id: z.number() }))
+    .input(
+      z.object({
+        id: z.number(),
+        questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
+        count: z.number().min(1).max(20).default(5),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
 
@@ -296,12 +302,11 @@ export const todoRouter = createRouter({
         return false;
       });
 
-      // 如果题库中有足够题目（至少3道），直接使用
-      if (matchedQuestions.length >= 3) {
-        // 随机选择 3-8 道题目
+      // 如果题库中有足够题目，直接使用
+      if (matchedQuestions.length >= input.count) {
+        // 随机选择指定数量的题目
         const shuffled = matchedQuestions.sort(() => 0.5 - Math.random());
-        const selectedCount = Math.min(Math.max(3, nodes.length * 2), 8, matchedQuestions.length);
-        const selected = shuffled.slice(0, selectedCount);
+        const selected = shuffled.slice(0, input.count);
 
         return {
           questions: selected.map((q) => ({
@@ -320,6 +325,8 @@ export const todoRouter = createRouter({
       const result = await generateTodoTestQuestions(
         todo.subject,
         nodes,
+        input.questionType,
+        input.count,
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined
@@ -334,6 +341,8 @@ export const todoRouter = createRouter({
       z.object({
         id: z.number(),
         urls: z.array(z.string().url()).min(1).max(5),
+        questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
+        count: z.number().min(1).max(20).default(5),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -363,6 +372,8 @@ export const todoRouter = createRouter({
         input.urls,
         todo.subject,
         nodes,
+        input.questionType,
+        input.count,
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined

@@ -1084,6 +1084,8 @@ ${nodesInfo}
 export async function generateTodoTestQuestions(
   subject: string,
   knowledgeNodes: string[],
+  questionType: string = "mixed",
+  count: number = 5,
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
@@ -1097,17 +1099,26 @@ export async function generateTodoTestQuestions(
     knowledgePoint: string;
   }>;
 }> {
-  const systemPrompt = `你是一位严格的考官AI。请根据用户今日学习的知识点，自主决定题目数量、题型和难度，生成高质量的测试题来检验学习效果。
+  const typeDesc = questionType === "mixed"
+    ? "混合题型（自动混合单选、多选、填空、简答等）"
+    : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
+
+  const systemPrompt = `你是一位严格的考官AI。请根据用户今日学习的知识点生成${count}道${typeDesc}测试题来检验学习效果。
 
 出题原则：
-1. 题目数量由你根据知识点数量和重要程度自主决定：
-   - 知识点较少（1-3个）或较简单：出3-5题
-   - 知识点适中（4-6个）：出5-8题
-   - 知识点较多（7个以上）或涉及核心难点：出8-12题
-2. 题型多样化，不局限于单选题，可包含：单选题、多选题、填空题、简答题、判断题
-3. 重要的、难度高的知识点应分配更多题目
+1. 必须生成指定数量和题型的题目
+2. 题目必须紧扣知识点内容
+3. 选项要有干扰性，不能一眼看出答案
 4. 每道题必须有详细解析
-5. 每道题标注对应的知识点和题型
+5. 每道题标注对应的知识点
+
+题目类型说明：
+- single_choice: 单选题，必须有4个选项
+- multiple_choice: 多选题，必须有4个选项，正确答案可能是多个
+- fill_blank: 填空题
+- short_answer: 简答题
+- essay: 论述题
+- mixed: 混合题型，自动组合以上多种题型
 
 请返回JSON格式：
 {
@@ -1124,16 +1135,16 @@ export async function generateTodoTestQuestions(
   ]
 }`;
 
-  const userPrompt = `请为以下知识点生成测试题：
+  const userPrompt = `请为以下知识点生成${count}道${typeDesc}：
 
 科目：${subject}
 知识点：
 ${knowledgeNodes.map((n, i) => `${i + 1}. ${n}`).join("\n")}
 
 要求：
-- 题目数量和题型由你根据知识点数量和难度自主决定
-- 核心/难点知识点分配更多题目
-- 题目必须能从知识点中直接找到依据`;
+- 题目必须能从知识点中直接找到依据
+- 严格按照指定数量和题型生成
+- 核心/难点知识点分配更多题目`;
 
   const result = await chatWithAI(
     [
@@ -1252,6 +1263,8 @@ export async function generateTodoTestFromFiles(
   urls: string[],
   subject: string,
   knowledgeNodes: string[],
+  questionType: string = "mixed",
+  count: number = 5,
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
@@ -1265,15 +1278,25 @@ export async function generateTodoTestFromFiles(
     knowledgePoint: string;
   }>;
 }> {
-  const systemPrompt = `你是一位严格的考官AI。请仔细阅读用户提供的文件内容，然后根据内容生成高质量的测试题来检验学习效果。
+  const typeDesc = questionType === "mixed"
+    ? "混合题型（自动混合单选、多选、填空、简答等）"
+    : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
+
+  const systemPrompt = `你是一位严格的考官AI。请仔细阅读用户提供的文件内容，然后根据内容生成${count}道${typeDesc}测试题来检验学习效果。
 
 出题原则：
 1. 仔细阅读文件内容，理解其中的知识点
-2. 题目数量由你根据文件内容长度和知识点数量自主决定（建议5-10题）
-3. 题型多样化，可包含：单选题、多选题、填空题、简答题、判断题
-4. 重要的、难度高的知识点应分配更多题目
-5. 每道题必须有详细解析
-6. 每道题标注对应的知识点和题型
+2. 必须生成指定数量和题型的题目
+3. 每道题必须有详细解析
+4. 每道题标注对应的知识点
+
+题目类型说明：
+- single_choice: 单选题，必须有4个选项
+- multiple_choice: 多选题，必须有4个选项，正确答案可能是多个
+- fill_blank: 填空题
+- short_answer: 简答题
+- essay: 论述题
+- mixed: 混合题型，自动组合以上多种题型
 
 请返回JSON格式：
 {
@@ -1304,14 +1327,14 @@ export async function generateTodoTestFromFiles(
     return { type: "file_url", file_url: { url } };
   });
 
-  const userPrompt = `请根据文件内容生成测试题。
+  const userPrompt = `请根据文件内容生成${count}道${typeDesc}。
 
 科目：${subject}
 知识点范围：${knowledgeNodes.join("、")}
 
 要求：
 - 题目必须基于文件内容
-- 题目数量和题型由你根据内容自主决定
+- 严格按照指定数量和题型生成
 - 核心/难点知识点分配更多题目`;
 
   const messages: KimiMessage[] = [

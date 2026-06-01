@@ -55,9 +55,20 @@ export default function Todos() {
   const [testStep, setTestStep] = useState<"loading" | "testing" | "result" | "select-source">("select-source");
   const [testResult, setTestResult] = useState<any>(null);
   const [testSource, setTestSource] = useState<"auto" | "file">("auto");
+  const [testQuestionType, setTestQuestionType] = useState<"single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed">("mixed");
+  const [testQuestionCount, setTestQuestionCount] = useState(5);
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
+
+  const questionTypeMap: Record<string, string> = {
+    single_choice: "单选题",
+    multiple_choice: "多选题",
+    fill_blank: "填空题",
+    short_answer: "简答题",
+    essay: "论述题",
+    mixed: "混合题型",
+  };
 
   const { data: settings } = trpc.settings.get.useQuery();
 
@@ -166,9 +177,15 @@ export default function Todos() {
       generateTestFromFiles.mutate({
         id: activeTodoId,
         urls: uploadedFiles.map((f) => f.url),
+        questionType: testQuestionType,
+        count: testQuestionCount,
       });
     } else {
-      generateTest.mutate({ id: activeTodoId });
+      generateTest.mutate({
+        id: activeTodoId,
+        questionType: testQuestionType,
+        count: testQuestionCount,
+      });
     }
   };
 
@@ -570,6 +587,39 @@ export default function Todos() {
                   </div>
                   <p className="text-xs text-muted-foreground">从PDF/Word/图片中出题</p>
                 </button>
+              </div>
+
+              {/* 题目类型和数量设置 */}
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">题目类型</label>
+                  <select
+                    value={testQuestionType}
+                    onChange={(e) => setTestQuestionType(e.target.value as any)}
+                    className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm"
+                  >
+                    <option value="single_choice">单选题</option>
+                    <option value="multiple_choice">多选题</option>
+                    <option value="fill_blank">填空题</option>
+                    <option value="short_answer">简答题</option>
+                    <option value="essay">论述题</option>
+                    <option value="mixed">混合题型</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">题目数量</label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={testQuestionCount}
+                      onChange={(e) => setTestQuestionCount(parseInt(e.target.value) || 5)}
+                      className="flex-1"
+                    />
+                    <span className="text-sm text-muted-foreground">道</span>
+                  </div>
+                </div>
               </div>
 
               {testSource === "file" && (
