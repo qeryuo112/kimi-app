@@ -138,10 +138,16 @@ export default function Subjects() {
 
   // 文件上传处理
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("[DEBUG] handleFileUpload called");
     const files = e.target.files;
-    if (!files || files.length === 0) return;
+    console.log("[DEBUG] files:", files);
+    if (!files || files.length === 0) {
+      console.log("[DEBUG] no files selected");
+      return;
+    }
 
     const fileServerUrl = settings?.fileServerUrl?.trim();
+    console.log("[DEBUG] fileServerUrl:", fileServerUrl);
     if (!fileServerUrl) {
       toast.error("请先在设置中配置文件上传服务器地址");
       return;
@@ -151,27 +157,34 @@ export default function Subjects() {
     const newFiles: Array<{ url: string; name: string }> = [];
 
     for (const file of Array.from(files)) {
+      console.log("[DEBUG] uploading file:", file.name);
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+        const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
+        console.log("[DEBUG] uploadUrl:", uploadUrl);
+        const res = await fetch(uploadUrl, {
           method: "POST",
           body: formData,
         });
+        console.log("[DEBUG] res status:", res.status);
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           toast.error(`${file.name} 上传失败: ${err.error || res.statusText}`);
           continue;
         }
         const data = await res.json();
+        console.log("[DEBUG] data:", data);
         if (data.url) {
           newFiles.push({ url: data.url, name: file.name });
         }
       } catch (err: any) {
+        console.error("[DEBUG] upload error:", err);
         toast.error(`${file.name} 上传失败: ${err.message}`);
       }
     }
 
+    console.log("[DEBUG] newFiles:", newFiles);
     setUploadedFiles((prev) => [...prev, ...newFiles]);
     setIsUploading(false);
     e.target.value = "";
@@ -398,13 +411,22 @@ export default function Subjects() {
                     <p className="text-xs text-muted-foreground">
                       上传教材、课件或参考资料，AI将直接读取文件内容并分析生成知识树
                     </p>
-                    <Input
-                      type="file"
-                      multiple
-                      accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
-                      onChange={handleFileUpload}
-                      disabled={isUploading}
-                    />
+                    <div className="relative border border-dashed border-border rounded-lg p-6 text-center hover:bg-secondary/30 transition-colors cursor-pointer"
+                      onClick={() => document.getElementById('subject-file-input')?.click()}
+                    >
+                      <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">点击选择文件</p>
+                      <p className="text-xs text-muted-foreground mt-1">支持 PDF、Word、图片</p>
+                      <input
+                        id="subject-file-input"
+                        type="file"
+                        multiple
+                        accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                        onChange={handleFileUpload}
+                        disabled={isUploading}
+                        className="hidden"
+                      />
+                    </div>
                     {isUploading && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1">
                         <Loader2 className="h-3 w-3 animate-spin" />
