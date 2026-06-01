@@ -39,25 +39,17 @@
 在 Render 的 Environment 中填入以下变量：
 
 ```env
-APP_ID=你的Kimi应用ID
-APP_SECRET=随机生成的强密码（用于JWT签名）
+APP_SECRET=随机生成的强密码（用于JWT签名和AI API fallback key）
 DATABASE_URL=PlanetScale提供的MySQL连接字符串
-VITE_KIMI_AUTH_URL=https://auth.kimi.com
-VITE_APP_ID=你的Kimi应用ID
-KIMI_AUTH_URL=https://auth.kimi.com
-KIMI_OPEN_URL=https://open.kimi.com
-OWNER_UNION_ID=你的Kimi Union ID
+AI_API_BASE_URL=https://api.openai.com
+OWNER_UNION_ID=（可选）管理员Union ID
 ```
 
-### 4. Kimi OAuth 回调地址配置
+### 4. AI API 配置
 
-部署成功后，Render 会给你一个域名（如 `https://my-app.onrender.com`）。
+本项目支持任何 OpenAI 兼容的 API。用户可在应用内的「设置」页面配置自己的 AI Provider（API Key、Base URL、模型名称）。
 
-前往 Kimi 开放平台（https://open.kimi.com），在你的应用设置中添加 OAuth 回调地址：
-
-```
-https://my-app.onrender.com/api/oauth/callback
-```
+如需设置全局默认 API，部署时配置 `AI_API_BASE_URL` 环境变量。
 
 ### 5. 推送代码到 GitHub
 
@@ -87,11 +79,7 @@ Railway 提供 $5/月免费额度，小项目通常够用。
 
 | 变量名 | 说明 | 获取方式 |
 |--------|------|---------|
-| `APP_ID` | Kimi 应用 ID | Kimi 开放平台 |
-| `APP_SECRET` | JWT 签名密钥 | 自行生成随机字符串 |
+| `APP_SECRET` | JWT 签名密钥 / AI API fallback key | 自行生成随机字符串 |
 | `DATABASE_URL` | MySQL 连接字符串 | PlanetScale 或 Railway |
-| `VITE_KIMI_AUTH_URL` | 前端 OAuth 地址 | 固定为 `https://auth.kimi.com` |
-| `VITE_APP_ID` | 前端使用的 App ID | 同 `APP_ID` |
-| `KIMI_AUTH_URL` | 后端 OAuth 地址 | 固定为 `https://auth.kimi.com` |
-| `KIMI_OPEN_URL` | Kimi 开放平台地址 | 固定为 `https://open.kimi.com` |
-| `OWNER_UNION_ID` | 管理员 Union ID | Kimi 账号的 Union ID |
+| `AI_API_BASE_URL` | 全局默认 AI API base URL | 如 `https://api.openai.com` |
+| `OWNER_UNION_ID` | 管理员 Union ID | （可选） |

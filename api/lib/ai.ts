@@ -133,7 +133,8 @@ export async function chatWithAI(
   const label = debugLabel || "chatWithAI";
   const startTime = Date.now();
   const key = apiKey || env.appSecret;
-  let url = apiUrl || `${env.kimiOpenUrl}/v1/chat/completions`;
+  const baseUrl = env.aiApiBaseUrl || "https://api.openai.com";
+  let url = apiUrl || `${baseUrl}/v1/chat/completions`;
 
   // 用户填写的是 base URL，补全路径
   if (url && !url.includes("/chat/completions")) {
@@ -141,7 +142,7 @@ export async function chatWithAI(
   }
 
   const body: Record<string, unknown> = {
-    model: modelName || "kimi-latest",
+    model: modelName || "gpt-4o",
     messages,
     temperature,
   };
@@ -159,7 +160,7 @@ export async function chatWithAI(
 
   debugLog(`${label} 请求开始`, {
     url,
-    model: modelName || "kimi-latest",
+    model: modelName || "gpt-4o",
     bodySizeMB,
     messagesCount: messages.length,
     promptChars: promptLength,

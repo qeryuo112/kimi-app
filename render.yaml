@@ -8,19 +8,11 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: APP_ID
-        sync: false
       - key: APP_SECRET
         generateValue: true
       - key: DATABASE_URL
         sync: false
-      - key: VITE_KIMI_AUTH_URL
-        sync: false
-      - key: VITE_APP_ID
-        sync: false
-      - key: KIMI_AUTH_URL
-        sync: false
-      - key: KIMI_OPEN_URL
+      - key: AI_API_BASE_URL
         sync: false
       - key: OWNER_UNION_ID
         sync: false
