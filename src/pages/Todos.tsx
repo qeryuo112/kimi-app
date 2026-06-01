@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/providers/trpc";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,9 @@ import {
   AlertTriangle,
   XCircle,
   Trash2,
+  Upload,
+  FileText,
+  X,
 } from "lucide-react";
 
 interface TestQuestion {
@@ -49,17 +52,72 @@ export default function Todos() {
   const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
   const [testAnswers, setTestAnswers] = useState<Record<string, string>>({});
   const [actualMinutes, setActualMinutes] = useState(30);
-  const [testStep, setTestStep] = useState<"loading" | "testing" | "result">("loading");
+  const [testStep, setTestStep] = useState<"loading" | "testing" | "result" | "select-source">("select-source");
   const [testResult, setTestResult] = useState<any>(null);
+  const [testSource, setTestSource] = useState<"auto" | "file">("auto");
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+
+  const { data: settings } = trpc.settings.get.useQuery();
+
+  // 从 localStorage 恢复缓存的题目
+  useEffect(() => {
+    const cached = localStorage.getItem("ai-exam-cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed.questions && parsed.questions.length > 0 && Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
+          // 24小时内有效
+          setIsResuming(true);
+        }
+      } catch {
+        // 忽略解析错误
+      }
+    }
+  }, []);
+
+  // 保存题目到 localStorage
+  useEffect(() => {
+    if (testQuestions.length > 0 && testStep === "testing") {
+      const cache = {
+        questions: testQuestions,
+        answers: testAnswers,
+        todoId: activeTodoId,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem("ai-exam-cache", JSON.stringify(cache));
+    }
+  }, [testQuestions, testAnswers, testStep, activeTodoId]);
+
+  // 清除缓存
+  const clearCache = () => {
+    localStorage.removeItem("ai-exam-cache");
+    setIsResuming(false);
+  };
 
   const generateTest = trpc.todo.generateTest.useMutation({
     onSuccess: (data) => {
       setTestQuestions(data.questions);
       setTestAnswers({});
       setTestStep("testing");
+      toast.success(data.source === "database" ? `从题库匹配 ${data.questions.length} 道题目` : `AI生成 ${data.questions.length} 道题目`);
     },
     onError: (err) => {
       setTestOpen(false);
+      alert(err.message);
+    },
+  });
+
+  const generateTestFromFiles = trpc.todo.generateTestFromFiles.useMutation({
+    onSuccess: (data) => {
+      setTestQuestions(data.questions);
+      setTestAnswers({});
+      setTestStep("testing");
+      toast.success(`从文件生成 ${data.questions.length} 道题目`);
+    },
+    onError: (err) => {
+      setTestStep("select-source");
       alert(err.message);
     },
   });
@@ -96,8 +154,83 @@ export default function Todos() {
   const handleStartTest = (todoId: number) => {
     setActiveTodoId(todoId);
     setTestOpen(true);
+    setTestStep("select-source");
+    setTestSource("auto");
+    setUploadedFiles([]);
+  };
+
+  const handleConfirmSource = () => {
+    if (!activeTodoId) return;
     setTestStep("loading");
-    generateTest.mutate({ id: todoId });
+    if (testSource === "file" && uploadedFiles.length > 0) {
+      generateTestFromFiles.mutate({
+        id: activeTodoId,
+        urls: uploadedFiles.map((f) => f.url),
+      });
+    } else {
+      generateTest.mutate({ id: activeTodoId });
+    }
+  };
+
+  const handleResumeTest = () => {
+    const cached = localStorage.getItem("ai-exam-cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        setTestQuestions(parsed.questions);
+        setTestAnswers(parsed.answers || {});
+        setActiveTodoId(parsed.todoId);
+        setTestStep("testing");
+        setTestOpen(true);
+        setIsResuming(false);
+      } catch {
+        toast.error("恢复失败");
+      }
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileServerUrl = settings?.fileServerUrl?.trim();
+    if (!fileServerUrl) {
+      toast.error("请先在设置中配置文件上传服务器地址");
+      return;
+    }
+
+    setIsUploading(true);
+    const newFiles: Array<{ url: string; name: string }> = [];
+
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast.error(`${file.name} 上传失败: ${err.error || res.statusText}`);
+          continue;
+        }
+        const data = await res.json();
+        if (data.url) {
+          newFiles.push({ url: data.url, name: file.name });
+        }
+      } catch (err: any) {
+        toast.error(`${file.name} 上传失败: ${err.message}`);
+      }
+    }
+
+    setUploadedFiles((prev) => [...prev, ...newFiles]);
+    setIsUploading(false);
+    e.target.value = "";
+  };
+
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmitTest = () => {
@@ -371,8 +504,32 @@ export default function Todos() {
         </TabsContent>
       </Tabs>
 
+      {/* 恢复测试提示 */}
+      {isResuming && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <Card className="border-primary/30 shadow-lg">
+            <CardContent className="p-4">
+              <p className="text-sm mb-2">发现有未完成的测试，是否继续？</p>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleResumeTest}>
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                  继续测试
+                </Button>
+                <Button size="sm" variant="outline" onClick={clearCache}>
+                  <X className="h-3.5 w-3.5 mr-1" />
+                  放弃
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* AI考官测试弹窗 */}
-      <Dialog open={testOpen} onOpenChange={setTestOpen}>
+      <Dialog open={testOpen} onOpenChange={(open) => {
+        if (!open) clearCache();
+        setTestOpen(open);
+      }}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -380,6 +537,86 @@ export default function Todos() {
               AI考官测试
             </DialogTitle>
           </DialogHeader>
+
+          {testStep === "select-source" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">选择出题方式：</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setTestSource("auto")}
+                  className={`p-4 rounded-lg border text-left transition-colors ${
+                    testSource === "auto"
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:bg-secondary/30"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Zap className="h-4 w-4 text-primary" />
+                    <span className="font-medium">智能出题</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">优先从题库选题，不够时AI生成</p>
+                </button>
+                <button
+                  onClick={() => setTestSource("file")}
+                  className={`p-4 rounded-lg border text-left transition-colors ${
+                    testSource === "file"
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:bg-secondary/30"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Upload className="h-4 w-4 text-primary" />
+                    <span className="font-medium">上传文件</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">从PDF/Word/图片中出题</p>
+                </button>
+              </div>
+
+              {testSource === "file" && (
+                <div className="space-y-3 pt-2">
+                  <Input
+                    type="file"
+                    multiple
+                    accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                    onChange={handleFileUpload}
+                    disabled={isUploading}
+                  />
+                  {isUploading && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      上传中...
+                    </p>
+                  )}
+                  {uploadedFiles.length > 0 && (
+                    <div className="space-y-1.5">
+                      {uploadedFiles.map((file, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-sm p-2 rounded bg-secondary/30">
+                          <FileText className="h-4 w-4 text-primary" />
+                          <span className="flex-1 truncate">{file.name}</span>
+                          <Button size="sm" variant="ghost" onClick={() => removeFile(idx)} className="h-6 w-6 p-0">
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  className="flex-1"
+                  onClick={handleConfirmSource}
+                  disabled={testSource === "file" && uploadedFiles.length === 0}
+                >
+                  开始测试
+                </Button>
+                <Button variant="outline" onClick={() => setTestOpen(false)}>
+                  取消
+                </Button>
+              </div>
+            </div>
+          )}
 
           {testStep === "loading" && (
             <div className="text-center py-12">

@@ -1247,6 +1247,91 @@ ${qaPairs}`;
   }
 }
 
+// 从文件生成测试题（AI考官根据文件内容出题）
+export async function generateTodoTestFromFiles(
+  urls: string[],
+  subject: string,
+  knowledgeNodes: string[],
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  questions: Array<{
+    id: string;
+    content: string;
+    options?: Array<{ label: string; text: string }>;
+    correctAnswer: string;
+    explanation: string;
+    knowledgePoint: string;
+  }>;
+}> {
+  const systemPrompt = `你是一位严格的考官AI。请仔细阅读用户提供的文件内容，然后根据内容生成高质量的测试题来检验学习效果。
+
+出题原则：
+1. 仔细阅读文件内容，理解其中的知识点
+2. 题目数量由你根据文件内容长度和知识点数量自主决定（建议5-10题）
+3. 题型多样化，可包含：单选题、多选题、填空题、简答题、判断题
+4. 重要的、难度高的知识点应分配更多题目
+5. 每道题必须有详细解析
+6. 每道题标注对应的知识点和题型
+
+请返回JSON格式：
+{
+  "questions": [
+    {
+      "id": "q1",
+      "content": "题目内容",
+      "options": [{"label": "A", "text": "选项A"}, {"label": "B", "text": "选项B"}, {"label": "C", "text": "选项C"}, {"label": "D", "text": "选项D"}],
+      "correctAnswer": "A",
+      "explanation": "详细解析",
+      "knowledgePoint": "对应知识点",
+      "questionType": "single_choice"
+    }
+  ]
+}`;
+
+  // 构建多模态内容
+  const contentBlocks: KimiContent[] = urls.map((url) => {
+    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+    const videoExts = ["mp4", "mov", "avi", "mkv", "webm"];
+    if (imageExts.includes(ext)) {
+      return { type: "image_url", image_url: { url } };
+    }
+    if (videoExts.includes(ext)) {
+      return { type: "video_url", video_url: { url } };
+    }
+    return { type: "file_url", file_url: { url } };
+  });
+
+  const userPrompt = `请根据文件内容生成测试题。
+
+科目：${subject}
+知识点范围：${knowledgeNodes.join("、")}
+
+要求：
+- 题目必须基于文件内容
+- 题目数量和题型由你根据内容自主决定
+- 核心/难点知识点分配更多题目`;
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: [...contentBlocks, { type: "text", text: userPrompt }],
+    },
+  ];
+
+  const result = await chatWithAI(messages, 0.6, apiKey, apiUrl, modelName, true);
+
+  try {
+    const parsed = JSON.parse(result);
+    return { questions: parsed.questions || [] };
+  } catch {
+    throw new Error("AI返回的测试题格式不正确");
+  }
+}
+
 // 从文件/图片 URL 中识别题目
 export async function recognizeQuestionsFromUrls(
   urls: string[],

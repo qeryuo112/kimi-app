@@ -11,9 +11,10 @@ import {
   knowledgeNodes,
   skillDimensions,
   subjects,
+  questions,
 } from "@db/schema";
-import { eq, and, lte, desc } from "drizzle-orm";
-import { generateTodoTestQuestions, evaluateTodoTestAnswers } from "./lib/ai";
+import { eq, and, lte, desc, inArray } from "drizzle-orm";
+import { generateTodoTestQuestions, generateTodoTestFromFiles, evaluateTodoTestAnswers } from "./lib/ai";
 
 // 根据掌握度计算下一次复习间隔（间隔重复算法）
 function calculateNextInterval(currentInterval: number, mastery: number): number {
@@ -257,11 +258,65 @@ export const todoRouter = createRouter({
 
       if (nodes.length === 0) throw new Error("该任务没有关联知识点，无法生成测试题");
 
+      // 获取知识点详情用于映射
+      const nodeIds = nodes.map((n: any) => n.id).filter(Boolean);
+      const nodeDetails = nodeIds.length > 0
+        ? await db
+            .select()
+            .from(knowledgeNodes)
+            .where(and(
+              eq(knowledgeNodes.userId, ctx.user.id),
+              inArray(knowledgeNodes.id, nodeIds)
+            ))
+        : [];
+      const nodeMap = new Map(nodeDetails.map((n) => [n.id, n]));
+
       const [setting] = await db
         .select()
         .from(userSettings)
         .where(eq(userSettings.userId, ctx.user.id));
 
+      // 智能选题：先从题库中找相关题目
+      const allQuestions = await db
+        .select()
+        .from(questions)
+        .where(eq(questions.userId, ctx.user.id));
+
+      // 根据知识点匹配题目
+      const matchedQuestions = allQuestions.filter((q) => {
+        // 匹配 nodeId
+        if (q.nodeId && nodes.some((n: any) => n.id === q.nodeId)) return true;
+        // 匹配 detectedKnowledgePoint
+        if (q.detectedKnowledgePoint) {
+          return nodes.some((n: any) =>
+            n.title?.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
+            q.detectedKnowledgePoint!.toLowerCase().includes(n.title?.toLowerCase() || "")
+          );
+        }
+        return false;
+      });
+
+      // 如果题库中有足够题目（至少3道），直接使用
+      if (matchedQuestions.length >= 3) {
+        // 随机选择 3-8 道题目
+        const shuffled = matchedQuestions.sort(() => 0.5 - Math.random());
+        const selectedCount = Math.min(Math.max(3, nodes.length * 2), 8, matchedQuestions.length);
+        const selected = shuffled.slice(0, selectedCount);
+
+        return {
+          questions: selected.map((q) => ({
+            id: `q-${q.id}`,
+            content: q.content,
+            options: q.options ? JSON.parse(q.options) : undefined,
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation || "",
+            knowledgePoint: q.detectedKnowledgePoint || nodeMap.get(q.nodeId)?.title || "综合",
+          })),
+          source: "database",
+        };
+      }
+
+      // 题库题目不够，调用 AI 生成
       const result = await generateTodoTestQuestions(
         todo.subject,
         nodes,
@@ -270,7 +325,50 @@ export const todoRouter = createRouter({
         setting?.aiModel || undefined
       );
 
-      return result;
+      return { ...result, source: "ai" };
+    }),
+
+  // 从文件生成测试题
+  generateTestFromFiles: authedQuery
+    .input(
+      z.object({
+        id: z.number(),
+        urls: z.array(z.string().url()).min(1).max(5),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [todo] = await db
+        .select()
+        .from(dailyTodos)
+        .where(and(eq(dailyTodos.id, input.id), eq(dailyTodos.userId, ctx.user.id)));
+
+      if (!todo) throw new Error("任务不存在");
+
+      const nodes = (() => {
+        try {
+          return JSON.parse(todo.knowledgeNodes || "[]");
+        } catch {
+          return [];
+        }
+      })();
+
+      const [setting] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      const result = await generateTodoTestFromFiles(
+        input.urls,
+        todo.subject,
+        nodes,
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
+
+      return { ...result, source: "ai" };
     }),
 
   // 提交测试答案 + AI评估（完成todo，自动创建学习记录并更新掌握度）
