@@ -244,9 +244,13 @@ export default function Questions() {
 
   // 更新题目
   const updateQuestion = trpc.question.update.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
       utils.question.list.invalidate();
-      toast.success("题目已更新");
+      if (data.aiRegenerated) {
+        toast.success("题目已更新，AI已重新生成答案和解析");
+      } else {
+        toast.success("题目已更新");
+      }
       setEditingQuestion(null);
     },
     onError: (err) => {

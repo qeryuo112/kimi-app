@@ -3,7 +3,8 @@ import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { questions, userAnswers, wrongAnswers, knowledgeNodes, userSettings, subjects } from "@db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { generateQuestions, generateQuestionsFromFileUrls, evaluateAnswer, recognizeQuestionsFromUrls } from "./lib/ai";
+import { generateQuestions, generateQuestionsFromFileUrls, evaluateAnswer, recognizeQuestionsFromUrls, chatWithAI } from "./lib/ai";
+import type { KimiContent } from "./lib/ai";
 
 export const questionRouter = createRouter({
   // 列出题库中的题目
@@ -349,7 +350,7 @@ export const questionRouter = createRouter({
       return { success: true, questions: savedQuestions };
     }),
 
-  // 更新题目
+  // 更新题目（如有图片则调用AI重新生成答案和解析）
   update: authedQuery
     .input(
       z.object({
@@ -364,6 +365,25 @@ export const questionRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      console.log("[question.update] 开始", { questionId: input.id, userId: ctx.user.id });
+
+      // 查询现有题目
+      const [existing] = await db
+        .select()
+        .from(questions)
+        .where(and(eq(questions.id, input.id), eq(questions.userId, ctx.user.id)));
+
+      if (!existing) {
+        console.log("[question.update] 题目不存在");
+        throw new Error("题目不存在");
+      }
+      console.log("[question.update] 现有题目", {
+        id: existing.id,
+        hasImage: !!existing.imageUrl,
+        imageUrl: existing.imageUrl,
+        contentLength: existing.content?.length,
+      });
+
       const updateData: Partial<typeof questions.$inferInsert> = {};
 
       if (input.content !== undefined) updateData.content = input.content;
@@ -373,12 +393,146 @@ export const questionRouter = createRouter({
       if (input.difficulty !== undefined) updateData.difficulty = input.difficulty;
       if (input.imageUrl !== undefined) updateData.imageUrl = input.imageUrl;
 
+      // 合并后的题目数据（用于判断是否需要AI重生成）
+      const mergedContent = input.content !== undefined ? input.content : existing.content;
+      const mergedImageUrl = input.imageUrl !== undefined ? input.imageUrl : existing.imageUrl;
+      const mergedOptions = input.options !== undefined ? input.options : existing.options;
+
+      console.log("[question.update] 合并后数据", {
+        hasImage: !!mergedImageUrl,
+        imageUrl: mergedImageUrl,
+        contentChanged: input.content !== undefined,
+        imageChanged: input.imageUrl !== undefined,
+      });
+
+      // 如果题目有图片（新上传或原本就有），调用AI重新生成答案和解析
+      if (mergedImageUrl) {
+        console.log("[question.update] 检测到图片，准备调用AI重新生成答案和解析");
+
+        const [setting] = await db
+          .select()
+          .from(userSettings)
+          .where(eq(userSettings.userId, ctx.user.id));
+
+        console.log("[question.update] 用户设置", {
+          hasApiKey: !!setting?.aiApiKey,
+          hasApiEndpoint: !!setting?.aiApiEndpoint,
+          model: setting?.aiModel,
+        });
+
+        // 构建多模态消息
+        const contentBlocks: KimiContent[] = [];
+
+        // 添加图片
+        const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+        const ext = mergedImageUrl.split("?")[0].split(".").pop()?.toLowerCase() || "";
+        if (imageExts.includes(ext)) {
+          contentBlocks.push({ type: "image_url", image_url: { url: mergedImageUrl, detail: "high" } });
+          console.log("[question.update] 使用 image_url 发送图片", { url: mergedImageUrl, ext });
+        } else {
+          contentBlocks.push({ type: "file_url", file_url: { url: mergedImageUrl } });
+          console.log("[question.update] 使用 file_url 发送文件", { url: mergedImageUrl, ext });
+        }
+
+        // 添加题干文字
+        let promptText = `请根据以下题目内容${mergedImageUrl ? "和图片" : ""}，重新生成或修正正确答案和详细解析。\n\n题目内容：\n${mergedContent}`;
+        if (mergedOptions) {
+          try {
+            const opts = JSON.parse(mergedOptions);
+            if (Array.isArray(opts) && opts.length > 0) {
+              promptText += "\n\n选项：\n" + opts.map((o: any) => `${o.label}. ${o.text}`).join("\n");
+            }
+          } catch {
+            console.log("[question.update] 选项解析失败，忽略选项");
+          }
+        }
+        promptText += "\n\n请严格按照以下JSON格式返回，不要包含任何其他文本：\n{\n  \"correctAnswer\": \"正确答案\",\n  \"explanation\": \"详细解析\"\n}";
+
+        contentBlocks.push({ type: "text", text: promptText });
+        console.log("[question.update] promptText长度", { length: promptText.length });
+
+        const systemPrompt = "你是一个专业的教育AI。请仔细分析用户提供的题目内容和图片，给出准确的正确答案和详细的解析。请严格按照JSON格式返回。";
+
+        try {
+          console.log("[question.update] 开始调用chatWithAI");
+          const aiResult = await chatWithAI(
+            [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: contentBlocks },
+            ],
+            0.3,
+            setting?.aiApiKey || undefined,
+            setting?.aiApiEndpoint || undefined,
+            setting?.aiModel || undefined,
+            true,
+            "question.update.regenerate",
+            true
+          );
+          console.log("[question.update] chatWithAI 返回", { resultLength: aiResult.length, first200: aiResult.slice(0, 200) });
+
+          // 解析JSON
+          let parsed: any;
+          try {
+            // 去除markdown代码块
+            let cleaned = aiResult.trim();
+            if (cleaned.startsWith("```")) {
+              const lines = cleaned.split("\n");
+              const startIdx = lines[0].startsWith("```") ? 1 : 0;
+              const endIdx = lines[lines.length - 1] === "```" ? lines.length - 1 : lines.length;
+              cleaned = lines.slice(startIdx, endIdx).join("\n");
+            }
+            // 查找JSON对象
+            const braceStart = cleaned.indexOf("{");
+            const braceEnd = cleaned.lastIndexOf("}");
+            if (braceStart >= 0 && braceEnd > braceStart) {
+              cleaned = cleaned.slice(braceStart, braceEnd + 1);
+            }
+            parsed = JSON.parse(cleaned);
+            console.log("[question.update] JSON解析成功", { parsed });
+          } catch (parseErr: any) {
+            console.error("[question.update] JSON解析失败", parseErr?.message, "raw:", aiResult.slice(0, 500));
+            // 解析失败不影响保存，继续用用户提供的值
+            parsed = null;
+          }
+
+          if (parsed) {
+            if (parsed.correctAnswer) {
+              updateData.correctAnswer = parsed.correctAnswer;
+              console.log("[question.update] AI生成correctAnswer", { correctAnswer: parsed.correctAnswer });
+            }
+            if (parsed.explanation) {
+              updateData.explanation = parsed.explanation;
+              console.log("[question.update] AI生成explanation", { explanationLength: parsed.explanation.length });
+            }
+          }
+        } catch (aiErr: any) {
+          console.error("[question.update] AI调用失败", aiErr?.message);
+          // AI失败不影响保存，继续用用户提供的值
+        }
+      } else {
+        console.log("[question.update] 无图片，跳过AI重新生成");
+      }
+
+      console.log("[question.update] 最终更新数据", { keys: Object.keys(updateData) });
+
       await db
         .update(questions)
         .set(updateData)
         .where(and(eq(questions.id, input.id), eq(questions.userId, ctx.user.id)));
 
-      return { success: true };
+      console.log("[question.update] 数据库更新完成");
+
+      // 查询更新后的题目返回
+      const [updated] = await db
+        .select()
+        .from(questions)
+        .where(and(eq(questions.id, input.id), eq(questions.userId, ctx.user.id)));
+
+      return {
+        success: true,
+        question: updated,
+        aiRegenerated: !!mergedImageUrl,
+      };
     }),
 
   // 删除题目
