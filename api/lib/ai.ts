@@ -306,6 +306,8 @@ ${content.trim().length > title.length + 5 ? `内容：\n${content.slice(0, 8000
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -521,6 +523,8 @@ ${content.slice(0, 8000)}
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -596,7 +600,7 @@ export async function analyzeFilesForSkills(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true);
+  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true, undefined, true);
 
   try {
     const parsed = JSON.parse(result);
@@ -657,6 +661,8 @@ export async function searchAndAnalyzeSubjects(
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -756,7 +762,8 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
     apiUrl,
     modelName,
     true,
-    "generateRoundAndMonthlyPlan"
+    "generateRoundAndMonthlyPlan",
+    true
   );
 
   try {
@@ -846,7 +853,8 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
     apiUrl,
     modelName,
     true,
-    "generateWeeklyPlan"
+    "generateWeeklyPlan",
+    true
   );
 
   try {
@@ -1018,7 +1026,8 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
     apiUrl,
     modelName,
     true,
-    `generateDailyPlanBatch-${startDay}-${endDay}`
+    `generateDailyPlanBatch-${startDay}-${endDay}`,
+    true
   );
 
   try {
@@ -1114,7 +1123,7 @@ export async function generateQuestionsFromFileUrls(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.7, apiKey, apiUrl, modelName, true);
+  const result = await chatWithAI(messages, 0.7, apiKey, apiUrl, modelName, true, undefined, true);
 
   try {
     const parsed = JSON.parse(result);
@@ -1203,6 +1212,8 @@ ${knowledgeContent.slice(0, 6000)}
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -1258,6 +1269,8 @@ export async function evaluateAnswer(
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -1327,6 +1340,8 @@ ${content || "无详细内容"}
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -1405,6 +1420,8 @@ ${content.slice(0, 8000)}
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -1478,6 +1495,8 @@ ${nodesInfo}
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -1567,6 +1586,8 @@ ${knowledgeNodes.map((n, i) => `${i + 1}. ${n}`).join("\n")}
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -1635,6 +1656,8 @@ ${qaPairs}`;
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -1758,7 +1781,7 @@ export async function generateTodoTestFromFiles(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.6, apiKey, apiUrl, modelName, true);
+  const result = await chatWithAI(messages, 0.6, apiKey, apiUrl, modelName, true, undefined, true);
 
   try {
     const parsed = JSON.parse(result);
@@ -1851,7 +1874,7 @@ export async function recognizeQuestionsFromUrls(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true);
+  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true, undefined, true);
 
   try {
     const parsed = JSON.parse(result);
@@ -1898,7 +1921,7 @@ ${contextData ? JSON.stringify(contextData, null, 2) : "暂无上下文数据"}
     })),
   ];
 
-  const result = await chatWithAI(chatMessages, 0.7, apiKey, apiUrl, modelName);
+  const result = await chatWithAI(chatMessages, 0.7, apiKey, apiUrl, modelName, false, undefined, true);
   return result;
 }
 
@@ -2028,6 +2051,8 @@ ${localNodes ? JSON.stringify(localNodes.map(n => ({ id: n.id, title: n.title, s
     apiKey,
     apiUrl,
     modelName,
+    true,
+    undefined,
     true
   );
 
@@ -2151,7 +2176,8 @@ ${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
     apiUrl,
     modelName,
     true,
-    "generateCompleteStudyPlanFromFile"
+    "generateCompleteStudyPlanFromFile",
+    true
   );
 
   try {
@@ -2254,7 +2280,8 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
     apiUrl,
     modelName,
     true,
-    "generateRoundAndMonthlyPlanFromFile"
+    "generateRoundAndMonthlyPlanFromFile",
+    true
   );
 
   debugLog("generateRoundAndMonthlyPlanFromFile 收到AI响应", {
@@ -2365,7 +2392,8 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
     apiUrl,
     modelName,
     true,
-    "generateWeeklyPlanFromFile"
+    "generateWeeklyPlanFromFile",
+    true
   );
 
   debugLog("generateWeeklyPlanFromFile 收到AI响应", {
@@ -2496,7 +2524,8 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
       apiUrl,
       modelName,
       true,
-      `generateDailyPlanFromFile-${startDay}-${endDay}`
+      `generateDailyPlanFromFile-${startDay}-${endDay}`,
+    true
     );
 
     debugLog(`generateDailyPlanFromFile 批次 ${batch + 1}/${totalBatches} 收到AI响应`, {
@@ -2595,7 +2624,8 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
     apiUrl,
     modelName,
     true,
-    `generateWeeklyDailyPlanFromFile-week${config.weekNumber}`
+    `generateWeeklyDailyPlanFromFile-week${config.weekNumber}`,
+    true
   );
 
   debugLog("generateWeeklyDailyPlanFromFile 收到AI响应", {
@@ -2706,7 +2736,8 @@ export async function generateWeeklyReviewQuestions(
     apiUrl,
     modelName,
     true,
-    `generateWeeklyReview-week${weekData.weekNumber}`
+    `generateWeeklyReview-week${weekData.weekNumber}`,
+    true
   );
 
   try {
@@ -2803,7 +2834,8 @@ ${answers.map((a, i) => `第${i + 1}题(${a.knowledgeNode})：用户答案"${a.u
     apiUrl,
     modelName,
     true,
-    `evaluateWeeklyReview-week${weekData.weekNumber}`
+    `evaluateWeeklyReview-week${weekData.weekNumber}`,
+    true
   );
 
   try {
