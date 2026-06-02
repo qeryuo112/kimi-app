@@ -70,11 +70,16 @@ export default function Subjects() {
   });
 
   const createSubject = trpc.subject.create.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
       utils.subject.list.invalidate();
       toast.success("科目创建成功");
       setIsDialogOpen(false);
       resetForm();
+      // 如果有内容，自动触发AI分析（AI会自动判断难度和优先级）
+      if (data?.sourceContent) {
+        setAnalyzingId(data.id);
+        analyzeSubject.mutate({ id: data.id });
+      }
     },
     onError: (err) => toast.error(err.message),
   });
@@ -290,30 +295,7 @@ export default function Subjects() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">难度 (1-5)</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={5}
-                      value={form.difficulty}
-                      onChange={(e) =>
-                        setForm({ ...form, difficulty: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">优先级 (1-5)</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={5}
-                      value={form.priority}
-                      onChange={(e) =>
-                        setForm({ ...form, priority: Number(e.target.value) })
-                      }
-                    />
-                  </div>
+                  {/* 难度和优先级由AI分析后自动判断，无需手动填写 */}
                 </div>
 
                 <div className="space-y-2">

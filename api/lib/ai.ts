@@ -301,14 +301,21 @@ ${content.trim().length > title.length + 5 ? `内容：\n${content.slice(0, 8000
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const jsonStr = extractJsonFromResponse(result);
+    debugLog("analyzeContentForKnowledgeTree 提取JSON", { jsonStrLength: jsonStr.length });
+    const parsed = JSON.parse(jsonStr);
     return {
       nodes: parsed.nodes || [],
       edges: parsed.edges || [],
       subjectDifficulty: parsed.subjectDifficulty || 3,
       subjectPriority: parsed.subjectPriority || 2,
     };
-  } catch {
+  } catch (err) {
+    debugLogError("analyzeContentForKnowledgeTree JSON解析失败", {
+      rawResponse: result.slice(0, 2000),
+      extractedJson: extractJsonFromResponse(result).slice(0, 2000),
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw new Error("AI返回的数据格式不正确");
   }
 }
@@ -404,14 +411,21 @@ export async function analyzeFilesForKnowledgeTree(
   const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true);
 
   try {
-    const parsed = JSON.parse(result);
+    const jsonStr = extractJsonFromResponse(result);
+    debugLog("analyzeFilesForKnowledgeTree 提取JSON", { jsonStrLength: jsonStr.length });
+    const parsed = JSON.parse(jsonStr);
     return {
       nodes: parsed.nodes || [],
       edges: parsed.edges || [],
       subjectDifficulty: parsed.subjectDifficulty || 3,
       subjectPriority: parsed.subjectPriority || 2,
     };
-  } catch {
+  } catch (err) {
+    debugLogError("analyzeFilesForKnowledgeTree JSON解析失败", {
+      rawResponse: result.slice(0, 2000),
+      extractedJson: extractJsonFromResponse(result).slice(0, 2000),
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw new Error("AI返回的数据格式不正确");
   }
 }
@@ -652,12 +666,14 @@ export async function generateRoundAndMonthlyPlan(
 }> {
   const systemPrompt = `你是一个顶级的学习规划AI。请根据科目列表、总时长和复习轮数，设计科学的复习轮次计划和月计划。
 
-要求：
-1. 将${totalMonths}个月划分为${reviewRounds}个复习轮次，每轮有明确的策略（如：基础夯实/强化提升/冲刺模拟）
-2. 第一轮最详细（新知识学习），后续轮次侧重复习和巩固
-3. 每月计划列出重点科目和目标
-4. 确保所有科目的知识点在${reviewRounds}轮中被完整覆盖
-5. 高优先级/基础科目优先安排在第一轮前期
+【核心要求 - 必须严格遵守】
+1. **必须覆盖所有科目的全部知识点，不能遗漏任何内容**
+2. 将${totalMonths}个月划分为${reviewRounds}个复习轮次，每轮有明确的策略（如：基础夯实/强化提升/冲刺模拟）
+3. 第一轮最详细（新知识学习），后续轮次侧重复习和巩固，如果用户输入只有1轮，则该轮包含所有内容。
+4. 每月计划列出重点科目和目标
+5. **每个知识点都必须分配到具体的月份，确保全部内容在总时长内完成**
+6. 高优先级/基础科目优先安排在第一轮前期，如果用户输入只有一轮，则优先级高的科目安排在前几个月，只有一个月的情况则全部内容安排在该月。
+7. 如果用户规定的时间紧张，根据知识点的重要性和难度进行调整分配时间长短，但绝不能跳过任何知识点
 
 请返回JSON格式：
 {
@@ -746,12 +762,14 @@ export async function generateWeeklyPlan(
 }> {
   const systemPrompt = `你是一个科学的学习计划生成AI。请根据月计划和知识树，生成每周的学习计划。
 
-要求：
-1. 将学习内容细化到周级别
-2. 每周有明确的主题和知识点安排
-3. 考虑知识点的依赖关系（前置知识优先）
-4. 每周只聚焦1-2个科目，避免跳跃
-5. 每周安排适量的复习时间
+【核心要求 - 必须严格遵守】
+1. **必须覆盖所有科目的全部知识点，不能遗漏任何内容**
+2. 将学习内容细化到周级别
+3. 每周有明确的主题和知识点安排
+4. 考虑知识点的依赖关系（前置知识优先）
+5. 每周聚焦1-2个科目，但**所有科目的知识点最终都必须被安排到具体的周**
+6. 每周安排适量的复习时间
+7. 如果用户规定的时间紧张，根据知识点的重要性和难度进行调整分配时间长短，但绝不能跳过任何知识点
 
 请返回JSON格式：
 {
@@ -2156,11 +2174,14 @@ export async function generateRoundAndMonthlyPlanFromFile(
 }> {
   const systemPrompt = `你是一个顶级的学习规划AI。请根据文件中的科目和知识树数据，设计复习轮次计划和月计划。
 
-要求：
-1. 将总时长划分为指定轮次的复习，每轮有明确策略
-2. 第一轮学习新知识，后续轮次侧重复习
-3. 每月列出重点科目和目标
-4. 高优先级/基础科目优先安排
+【核心要求 - 必须严格遵守】
+1. **必须覆盖文件中所有科目的全部知识点，不能遗漏任何内容**
+2. 将总时长划分为指定轮次的复习，每轮有明确策略
+3. 第一轮学习新知识，后续轮次侧重复习
+4. 每月列出重点科目和目标
+5. 高优先级/基础科目优先安排
+6. **每个知识点都必须分配到具体的月份，确保全部内容在总时长内完成**
+7. 如果时间紧张，适当降低每个知识点的学习深度，但绝不能跳过任何知识点
 
 请返回JSON格式：
 {
@@ -2252,11 +2273,14 @@ export async function generateWeeklyPlanFromFile(
 }> {
   const systemPrompt = `你是一个科学的学习计划生成AI。请根据文件中的科目和知识树数据，以及月计划概览，生成每周的学习计划。
 
-要求：
-1. 将学习内容细化到周级别
-2. 每周有明确的主题和知识点安排
-3. 考虑知识点依赖关系
-4. 每周聚焦1-2个科目
+【核心要求 - 必须严格遵守】
+1. **必须覆盖文件中所有科目的全部知识点，不能遗漏任何内容**
+2. 将学习内容细化到周级别
+3. 每周有明确的主题和知识点安排
+4. 考虑知识点依赖关系
+5. 每周聚焦1-2个科目，但**所有科目的知识点最终都必须被安排**
+6. **每个知识点都必须分配到具体的周**
+7. 如果时间紧张，适当降低每个知识点的学习深度，但绝不能跳过任何知识点
 
 请返回JSON格式：
 {
