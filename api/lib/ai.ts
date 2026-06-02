@@ -116,6 +116,7 @@ interface KimiResponse {
   choices: Array<{
     message: {
       content: string;
+      reasoning_content?: string;
     };
   }>;
 }
@@ -128,7 +129,8 @@ export async function chatWithAI(
   apiUrl?: string,
   modelName?: string,
   requireJson = false,
-  debugLabel?: string
+  debugLabel?: string,
+  enableThinking?: boolean
 ): Promise<string> {
   const label = debugLabel || "chatWithAI";
   const startTime = Date.now();
@@ -145,9 +147,13 @@ export async function chatWithAI(
     model: modelName || "gpt-4o",
     messages,
     temperature,
+    max_tokens: 32768,
   };
   if (requireJson) {
     body.response_format = { type: "json_object" };
+  }
+  if (enableThinking) {
+    body.thinking = { type: "enabled" };
   }
 
   // 计算请求体大致大小用于调试
@@ -189,11 +195,14 @@ export async function chatWithAI(
     // 记录响应的前500字符用于调试
     const previewContent = content.slice(0, 500);
     const hasMore = content.length > 500 ? `... (总共${content.length}字符)` : "";
+    const reasoning = data.choices?.[0]?.message?.reasoning_content;
     debugLog(`${label} 请求成功`, {
       elapsedMs: elapsed,
       responseLength: content.length,
       firstChars: previewContent + hasMore,
       choicesCount: data.choices?.length || 0,
+      hasReasoning: !!reasoning,
+      reasoningLength: reasoning?.length || 0,
     });
     return content;
   } catch (err) {
@@ -408,7 +417,7 @@ export async function analyzeFilesForKnowledgeTree(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true);
+  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true, undefined, true);
 
   try {
     const jsonStr = extractJsonFromResponse(result);
@@ -421,11 +430,34 @@ export async function analyzeFilesForKnowledgeTree(
       subjectPriority: parsed.subjectPriority || 2,
     };
   } catch (err) {
-    debugLogError("analyzeFilesForKnowledgeTree JSON解析失败", {
-      rawResponse: result.slice(0, 2000),
-      extractedJson: extractJsonFromResponse(result).slice(0, 2000),
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const extracted = extractJsonFromResponse(result);
+    const errMsg = err instanceof Error ? err.message : String(err);
+
+    // 直接写入详细调试信息到日志文件（避免 debugLogError 对对象输出 [object Object]）
+    const debugInfo = {
+      timestamp: new Date().toISOString(),
+      label: "analyzeFilesForKnowledgeTree JSON解析失败",
+      responseLength: result.length,
+      extractedLength: extracted.length,
+      error: errMsg,
+      rawResponseFirst500: result.slice(0, 500),
+      rawResponseLast500: result.slice(-500),
+      extractedJsonFirst500: extracted.slice(0, 500),
+      extractedJsonLast500: extracted.slice(-500),
+    };
+
+    try {
+      fs.appendFileSync(DEBUG_LOG_FILE, JSON.stringify(debugInfo, null, 2) + "\n");
+    } catch {
+      // 忽略
+    }
+
+    // 同时记录精简版到控制台
+    console.error("[AI-DEBUG-ERROR] analyzeFilesForKnowledgeTree JSON解析失败 |", errMsg,
+      "| responseLength:", result.length,
+      "| extractedLength:", extracted.length,
+      "| last500:", result.slice(-500).replace(/\n/g, "\\n"));
+
     throw new Error("AI返回的数据格式不正确");
   }
 }
