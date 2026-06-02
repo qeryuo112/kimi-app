@@ -97,7 +97,7 @@ export default function Plans() {
   // 获取科目管理列表
   const { data: allSubjects } = trpc.subject.list.useQuery();
 
-  // AI生成计划
+  // AI生成计划（一次性生成全部，向后兼容）
   const aiGenerateSchedule = trpc.plan.aiGenerateSchedule.useMutation({
     onSuccess: (data) => {
       if (expandedPlan !== null) {
@@ -108,6 +108,42 @@ export default function Plans() {
     onError: (err) => {
       toast.error(`生成失败: ${err.message}`);
     },
+  });
+
+  // 单独生成月计划
+  const aiGenerateMonthly = trpc.plan.aiGenerateMonthly.useMutation({
+    onSuccess: () => {
+      if (expandedPlan !== null) utils.plan.getById.invalidate({ id: expandedPlan });
+      toast.success("月计划生成成功！");
+    },
+    onError: (err) => toast.error(`月计划生成失败: ${err.message}`),
+  });
+
+  // 单独生成周计划
+  const aiGenerateWeekly = trpc.plan.aiGenerateWeekly.useMutation({
+    onSuccess: () => {
+      if (expandedPlan !== null) utils.plan.getById.invalidate({ id: expandedPlan });
+      toast.success("周计划生成成功！");
+    },
+    onError: (err) => toast.error(`周计划生成失败: ${err.message}`),
+  });
+
+  // 重新生成月计划
+  const aiRegenerateMonthly = trpc.plan.aiRegenerateMonthly.useMutation({
+    onSuccess: () => {
+      if (expandedPlan !== null) utils.plan.getById.invalidate({ id: expandedPlan });
+      toast.success("月计划已重新生成，周/日计划已清空");
+    },
+    onError: (err) => toast.error(`重新生成失败: ${err.message}`),
+  });
+
+  // 重新生成周计划
+  const aiRegenerateWeekly = trpc.plan.aiRegenerateWeekly.useMutation({
+    onSuccess: () => {
+      if (expandedPlan !== null) utils.plan.getById.invalidate({ id: expandedPlan });
+      toast.success("周计划已重新生成，日计划已清空");
+    },
+    onError: (err) => toast.error(`重新生成失败: ${err.message}`),
   });
 
   // 删除生成的复习计划
@@ -122,7 +158,7 @@ export default function Plans() {
     onError: (err) => toast.error(err.message),
   });
 
-  // 按周生成日计划
+  // 按周生成日计划（支持重新生成）
   const [generatingWeek, setGeneratingWeek] = useState<number | null>(null);
   const aiGenerateWeeklyDaily = trpc.plan.aiGenerateWeeklyDaily.useMutation({
     onSuccess: (data) => {
@@ -681,72 +717,113 @@ export default function Plans() {
                           告诉AI你的实际情况和偏好，生成的计划会更贴合你的需求
                         </p>
                       </div>
-                      <Button
-                        onClick={() => {
-                          setSelectedPlanId(plan.id);
-                          aiGenerateSchedule.mutate({
-                            id: plan.id,
-                            requirements: planRequirements[plan.id] || undefined,
-                          });
-                        }}
-                        disabled={aiGenerateSchedule.isPending}
-                        className="w-full"
-                      >
-                        <Sparkles className="h-4 w-4 mr-1" />
-                        {aiGenerateSchedule.isPending ? "生成中..." : "AI生成复习计划"}
-                      </Button>
+                      {/* 计划生成按钮组 */}
+                      {(() => {
+                        const schedule = plan.aiPlan ? JSON.parse(plan.aiPlan) : null;
+                        const hasMonthly = schedule?.monthlyPlan?.length > 0;
+                        const hasWeekly = schedule?.weeklyPlan?.length > 0;
+                        const reqs = planRequirements[plan.id] || undefined;
 
-                      {/* 生成今日任务 */}
-                      {plan.aiPlan ? (
-                        <div className="flex gap-2 w-full">
-                          <Button
-                            variant="outline"
-                            onClick={() => generateTodos.mutate({ planId: plan.id })}
-                            disabled={generateTodos.isPending}
-                            className="flex-1"
-                          >
-                            <CheckSquare className="h-4 w-4 mr-1" />
-                            {generateTodos.isPending ? "生成中..." : "生成今日任务"}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              setSelectedPlanId(plan.id);
-                              aiGenerateSchedule.mutate({
-                                id: plan.id,
-                                requirements: planRequirements[plan.id] || undefined,
-                              });
-                            }}
-                            disabled={aiGenerateSchedule.isPending}
-                            className="flex-1"
-                          >
-                            <Sparkles className="h-4 w-4 mr-1" />
-                            {aiGenerateSchedule.isPending ? "生成中..." : "重新生成"}
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="icon"
-                            onClick={() => {
-                              if (confirm("确定要删除此复习计划吗？删除后可以重新生成。")) {
-                                deleteSchedule.mutate({ id: plan.id });
-                              }
-                            }}
-                            disabled={deleteSchedule.isPending}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          onClick={() => generateTodos.mutate({ planId: plan.id })}
-                          disabled={generateTodos.isPending || !plan.aiPlan}
-                          className="w-full"
-                        >
-                          <CheckSquare className="h-4 w-4 mr-1" />
-                          {generateTodos.isPending ? "生成中..." : "生成今日任务"}
-                        </Button>
-                      )}
+                        const isGenerating = aiGenerateSchedule.isPending || aiGenerateMonthly.isPending || aiGenerateWeekly.isPending || aiRegenerateMonthly.isPending || aiRegenerateWeekly.isPending;
+
+                        return (
+                          <div className="space-y-2">
+                            {!hasMonthly ? (
+                              // 无计划：生成月计划
+                              <Button
+                                onClick={() => {
+                                  setSelectedPlanId(plan.id);
+                                  aiGenerateMonthly.mutate({ id: plan.id, requirements: reqs });
+                                }}
+                                disabled={isGenerating}
+                                className="w-full"
+                              >
+                                <Sparkles className="h-4 w-4 mr-1" />
+                                {aiGenerateMonthly.isPending ? "生成中..." : "AI生成月计划"}
+                              </Button>
+                            ) : !hasWeekly ? (
+                              // 有月计划无周计划
+                              <div className="flex gap-2 w-full">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => aiRegenerateMonthly.mutate({ id: plan.id, requirements: reqs })}
+                                  disabled={isGenerating}
+                                  className="flex-1"
+                                >
+                                  <Sparkles className="h-4 w-4 mr-1" />
+                                  {aiRegenerateMonthly.isPending ? "生成中..." : "重新生成月计划"}
+                                </Button>
+                                <Button
+                                  onClick={() => aiGenerateWeekly.mutate({ id: plan.id, requirements: reqs })}
+                                  disabled={isGenerating}
+                                  className="flex-1"
+                                >
+                                  <Sparkles className="h-4 w-4 mr-1" />
+                                  {aiGenerateWeekly.isPending ? "生成中..." : "生成周计划"}
+                                </Button>
+                              </div>
+                            ) : (
+                              // 有月计划和周计划
+                              <div className="flex gap-2 w-full">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => aiRegenerateMonthly.mutate({ id: plan.id, requirements: reqs })}
+                                  disabled={isGenerating}
+                                  className="flex-1"
+                                >
+                                  <Sparkles className="h-4 w-4 mr-1" />
+                                  {aiRegenerateMonthly.isPending ? "生成中..." : "重新生成月计划"}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => aiRegenerateWeekly.mutate({ id: plan.id, requirements: reqs })}
+                                  disabled={isGenerating}
+                                  className="flex-1"
+                                >
+                                  <Sparkles className="h-4 w-4 mr-1" />
+                                  {aiRegenerateWeekly.isPending ? "生成中..." : "重新生成周计划"}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => aiGenerateSchedule.mutate({ id: plan.id, requirements: reqs })}
+                                  disabled={isGenerating}
+                                  className="flex-1"
+                                >
+                                  <Sparkles className="h-4 w-4 mr-1" />
+                                  {aiGenerateSchedule.isPending ? "生成中..." : "全部重新生成"}
+                                </Button>
+                              </div>
+                            )}
+
+                            {/* 生成今日任务 + 删除 */}
+                            <div className="flex gap-2 w-full">
+                              <Button
+                                variant="outline"
+                                onClick={() => generateTodos.mutate({ planId: plan.id })}
+                                disabled={generateTodos.isPending || !plan.aiPlan}
+                                className="flex-1"
+                              >
+                                <CheckSquare className="h-4 w-4 mr-1" />
+                                {generateTodos.isPending ? "生成中..." : "生成今日任务"}
+                              </Button>
+                              {plan.aiPlan && (
+                                <Button
+                                  variant="destructive"
+                                  size="icon"
+                                  onClick={() => {
+                                    if (confirm("确定要删除此复习计划吗？删除后可以重新生成。")) {
+                                      deleteSchedule.mutate({ id: plan.id });
+                                    }
+                                  }}
+                                  disabled={deleteSchedule.isPending}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* 未分析科目提示 */}
                       {planDetail && planDetail.subjects && planDetail.subjects.some((s: any) => s.status !== "analyzed") && (
@@ -853,9 +930,22 @@ export default function Plans() {
                                                 生成中...
                                               </Button>
                                             ) : isGenerated || hasDailyForWeek ? (
-                                              <Button variant="ghost" size="sm" disabled className="w-full h-7 text-xs text-green-600">
-                                                <Check className="h-3 w-3 mr-1" />
-                                                日计划已生成
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full h-7 text-xs"
+                                                onClick={() => {
+                                                  setGeneratingWeek(weekNum);
+                                                  aiGenerateWeeklyDaily.mutate({
+                                                    planId: plan.id,
+                                                    weekNumber: weekNum,
+                                                    requirements: planRequirements[plan.id] || undefined,
+                                                    force: true,
+                                                  });
+                                                }}
+                                              >
+                                                <Sparkles className="h-3 w-3 mr-1" />
+                                                重新生成日计划
                                               </Button>
                                             ) : (
                                               <Button
@@ -867,6 +957,7 @@ export default function Plans() {
                                                   aiGenerateWeeklyDaily.mutate({
                                                     planId: plan.id,
                                                     weekNumber: weekNum,
+                                                    requirements: planRequirements[plan.id] || undefined,
                                                   });
                                                 }}
                                               >
