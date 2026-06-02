@@ -16,6 +16,47 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+// ========== 定时清理超过24小时的文件 ==========
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24小时
+const FILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;     // 文件保留24小时
+
+function cleanupOldFiles() {
+  const now = Date.now();
+  let deletedCount = 0;
+  let totalCount = 0;
+
+  try {
+    const files = fs.readdirSync(UPLOAD_DIR);
+    for (const filename of files) {
+      const filePath = path.join(UPLOAD_DIR, filename);
+      try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile()) continue;
+        totalCount++;
+        const age = now - stat.mtime.getTime();
+        if (age > FILE_MAX_AGE_MS) {
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        }
+      } catch (e) {
+        console.error(`[UploadServer] 清理文件失败: ${filename}`, e.message);
+      }
+    }
+    if (deletedCount > 0) {
+      console.log(`[UploadServer] 清理完成: 删除 ${deletedCount} 个过期文件 (共检查 ${totalCount} 个)`);
+    } else {
+      console.log(`[UploadServer] 清理检查完成: 无过期文件 (共检查 ${totalCount} 个)`);
+    }
+  } catch (e) {
+    console.error("[UploadServer] 清理任务异常:", e.message);
+  }
+}
+
+// 启动时立即执行一次清理，然后每24小时执行
+setTimeout(cleanupOldFiles, 5000);
+setInterval(cleanupOldFiles, CLEANUP_INTERVAL_MS);
+console.log("[UploadServer] 文件清理任务已启用: 每24小时清理一次过期文件");
+
 // 允许的扩展名
 const ALLOWED_EXTS = new Set([
   ".pdf", ".doc", ".docx", ".txt", ".md", ".json",

@@ -2264,10 +2264,12 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
   try {
     const jsonStr = extractJsonFromResponse(result);
+    debugLog("generateRoundAndMonthlyPlanFromFile 提取JSON", { jsonStrLength: jsonStr.length });
     const parsed = JSON.parse(jsonStr);
     debugLog("generateRoundAndMonthlyPlanFromFile 解析成功", {
       roundsCount: parsed.rounds?.length,
       monthsCount: parsed.months?.length,
+      subjectsInMonths: parsed.months?.flatMap((m: any) => m.subjects || []),
       sampleRounds: parsed.rounds?.slice(0, 2),
       sampleMonths: parsed.months?.slice(0, 2)
     });
@@ -2276,7 +2278,16 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
       months: parsed.months || [],
     };
   } catch (err) {
-    debugLogError("generateRoundAndMonthlyPlanFromFile JSON解析失败", { error: err, result: result.slice(0, 2000) });
+    const extracted = extractJsonFromResponse(result);
+    debugLogError("generateRoundAndMonthlyPlanFromFile JSON解析失败", {
+      error: err instanceof Error ? err.message : String(err),
+      responseLength: result.length,
+      extractedLength: extracted.length,
+      resultFirst500: result.slice(0, 500),
+      resultLast500: result.slice(-500),
+      extractedFirst500: extracted.slice(0, 500),
+      extractedLast500: extracted.slice(-500),
+    });
     throw new Error("AI返回的轮次/月计划数据格式不正确");
   }
 }
@@ -2364,14 +2375,27 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
   try {
     const jsonStr = extractJsonFromResponse(result);
+    debugLog("generateWeeklyPlanFromFile 提取JSON", { jsonStrLength: jsonStr.length });
     const parsed = JSON.parse(jsonStr);
+    const allSubjects = [...new Set(parsed.weeks?.flatMap((w: any) => w.subjects || []))];
     debugLog("generateWeeklyPlanFromFile 解析成功", {
       weeksCount: parsed.weeks?.length,
+      subjectsCovered: allSubjects,
+      subjectCount: allSubjects.length,
       sampleWeeks: parsed.weeks?.slice(0, 3)
     });
     return { weeks: parsed.weeks || [] };
   } catch (err) {
-    debugLogError("generateWeeklyPlanFromFile JSON解析失败", { error: err, result: result.slice(0, 2000) });
+    const extracted = extractJsonFromResponse(result);
+    debugLogError("generateWeeklyPlanFromFile JSON解析失败", {
+      error: err instanceof Error ? err.message : String(err),
+      responseLength: result.length,
+      extractedLength: extracted.length,
+      resultFirst500: result.slice(0, 500),
+      resultLast500: result.slice(-500),
+      extractedFirst500: extracted.slice(0, 500),
+      extractedLast500: extracted.slice(-500),
+    });
     throw new Error("AI返回的周计划数据格式不正确");
   }
 }
@@ -2581,16 +2605,29 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
   try {
     const jsonStr = extractJsonFromResponse(result);
+    debugLog("generateWeeklyDailyPlanFromFile 提取JSON", { jsonStrLength: jsonStr.length });
     const parsed = JSON.parse(jsonStr);
     const days = parsed.days || [];
+    const allSubjects = [...new Set(days.map((d: any) => d.subject))];
     debugLog("generateWeeklyDailyPlanFromFile 解析成功", {
       weekNumber: config.weekNumber,
       daysCount: days.length,
+      subjectsCovered: allSubjects,
+      subjectCount: allSubjects.length,
       sample: days.slice(0, 2)
     });
     return { days };
   } catch (err) {
-    debugLogError("generateWeeklyDailyPlanFromFile JSON解析失败", { error: err, result: result.slice(0, 2000) });
+    const extracted = extractJsonFromResponse(result);
+    debugLogError("generateWeeklyDailyPlanFromFile JSON解析失败", {
+      error: err instanceof Error ? err.message : String(err),
+      responseLength: result.length,
+      extractedLength: extracted.length,
+      resultFirst500: result.slice(0, 500),
+      resultLast500: result.slice(-500),
+      extractedFirst500: extracted.slice(0, 500),
+      extractedLast500: extracted.slice(-500),
+    });
     throw new Error("AI返回的日计划数据格式不正确");
   }
 }
