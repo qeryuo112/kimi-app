@@ -115,7 +115,7 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery, onEdit
             <Star className="h-3 w-3 text-muted-foreground" />
             <span className="text-[10px] text-muted-foreground">{node.importance}</span>
           </div>
-          <div className="w-20">
+          <div className="w-20 group-hover:hidden">
             <div className="flex items-center justify-between text-[10px] mb-0.5">
               <span className="text-muted-foreground">掌握度</span>
               <span className={node.mastery >= 80 ? "text-green-400" : node.mastery >= 50 ? "text-yellow-400" : "text-red-400"}>
@@ -129,7 +129,7 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery, onEdit
               />
             </div>
           </div>
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="hidden items-center gap-0.5 group-hover:flex">
             <Button
               variant="ghost"
               size="icon"
