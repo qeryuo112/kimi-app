@@ -7,6 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
 import {
   Select,
   SelectContent,
@@ -22,6 +33,9 @@ import {
   Clock,
   Star,
   AlertTriangle,
+  Pen,
+  Plus,
+  Trash2,
 } from "lucide-react";
 
 interface TreeNodeData {
@@ -42,9 +56,12 @@ interface TreeNodeProps {
   expandedNodes: Set<number>;
   toggleNode: (id: number) => void;
   onUpdateMastery: (id: number, mastery: number) => void;
+  onEdit: (node: TreeNodeData) => void;
+  onAddChild: (parentId: number, parentLevel: number) => void;
+  onDelete: (node: TreeNodeData) => void;
 }
 
-function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery }: TreeNodeProps) {
+function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery, onEdit, onAddChild, onDelete }: TreeNodeProps) {
   const isExpanded = expandedNodes.has(node.id);
   const hasChildren = node.children.length > 0;
   const tags = node.tags ? JSON.parse(node.tags) : [];
@@ -112,18 +129,56 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery }: Tree
               />
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={(e) => {
-              e.stopPropagation();
-              const newMastery = Math.min(100, node.mastery + 10);
-              onUpdateMastery(node.id, newMastery);
-            }}
-          >
-            +10%
-          </Button>
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              title="编辑"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(node);
+              }}
+            >
+              <Pen className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              title="添加子节点"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddChild(node.id, node.level);
+              }}
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-destructive hover:text-destructive"
+              title="删除"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(node);
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px]"
+              onClick={(e) => {
+                e.stopPropagation();
+                const newMastery = Math.min(100, node.mastery + 10);
+                onUpdateMastery(node.id, newMastery);
+              }}
+            >
+              +10%
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -136,6 +191,9 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery }: Tree
               expandedNodes={expandedNodes}
               toggleNode={toggleNode}
               onUpdateMastery={onUpdateMastery}
+              onEdit={onEdit}
+              onAddChild={onAddChild}
+              onDelete={onDelete}
             />
           ))}
         </div>
@@ -153,6 +211,19 @@ export default function KnowledgeTree() {
   const [selectedSubject, setSelectedSubject] = useState<string>("");
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
 
+  // 编辑对话框状态
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingNode, setEditingNode] = useState<TreeNodeData | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+
+  // 添加对话框状态
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addParentId, setAddParentId] = useState<number | undefined>(undefined);
+  const [addLevel, setAddLevel] = useState(1);
+  const [addTitle, setAddTitle] = useState("");
+  const [addDescription, setAddDescription] = useState("");
+
   const utils = trpc.useUtils();
   const { data: subjects } = trpc.subject.list.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -169,6 +240,84 @@ export default function KnowledgeTree() {
       utils.subject.list.invalidate();
     },
   });
+
+  const updateNode = trpc.knowledge.updateNode.useMutation({
+    onSuccess: () => {
+      toast.success("知识点已更新");
+      utils.knowledge.getTree.invalidate();
+      setEditDialogOpen(false);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const createNode = trpc.knowledge.createNode.useMutation({
+    onSuccess: () => {
+      toast.success("子知识点已添加");
+      utils.knowledge.getTree.invalidate();
+      setAddDialogOpen(false);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const deleteNode = trpc.knowledge.deleteNode.useMutation({
+    onSuccess: () => {
+      toast.success("知识点已删除");
+      utils.knowledge.getTree.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleEdit = (node: TreeNodeData) => {
+    setEditingNode(node);
+    setEditTitle(node.title);
+    setEditDescription(node.description || "");
+    setEditDialogOpen(true);
+  };
+
+  const handleAddChild = (parentId: number, parentLevel: number) => {
+    setAddParentId(parentId);
+    setAddLevel(Math.min(5, parentLevel + 1));
+    setAddTitle("");
+    setAddDescription("");
+    setAddDialogOpen(true);
+  };
+
+  const handleDelete = (node: TreeNodeData) => {
+    if (confirm(`确定要删除知识点"${node.title}"吗？${node.children.length > 0 ? "该操作会同时删除其所有子知识点。" : ""}`)) {
+      deleteNode.mutate({ id: node.id });
+    }
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingNode) return;
+    if (!editTitle.trim()) {
+      toast.error("标题不能为空");
+      return;
+    }
+    updateNode.mutate({
+      id: editingNode.id,
+      title: editTitle.trim(),
+      description: editDescription.trim() || undefined,
+    });
+  };
+
+  const handleSaveAdd = () => {
+    if (!addTitle.trim()) {
+      toast.error("标题不能为空");
+      return;
+    }
+    if (!selectedSubject) {
+      toast.error("请先选择科目");
+      return;
+    }
+    createNode.mutate({
+      subjectId: Number(selectedSubject),
+      parentId: addParentId,
+      title: addTitle.trim(),
+      description: addDescription.trim() || undefined,
+      level: addLevel,
+    });
+  };
 
   const toggleNode = (id: number) => {
     setExpandedNodes((prev) => {
@@ -250,6 +399,74 @@ export default function KnowledgeTree() {
         </Select>
       </div>
 
+      {/* 编辑对话框 */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">编辑知识点</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>标题 *</Label>
+              <Input
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="知识点标题"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>描述</Label>
+              <Textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="知识点描述"
+                rows={4}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>取消</Button>
+            <Button onClick={handleSaveEdit} disabled={updateNode.isPending}>
+              {updateNode.isPending ? "保存中..." : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 添加对话框 */}
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">添加子知识点</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>标题 *</Label>
+              <Input
+                value={addTitle}
+                onChange={(e) => setAddTitle(e.target.value)}
+                placeholder="知识点标题"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>描述</Label>
+              <Textarea
+                value={addDescription}
+                onChange={(e) => setAddDescription(e.target.value)}
+                placeholder="知识点描述"
+                rows={4}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDialogOpen(false)}>取消</Button>
+            <Button onClick={handleSaveAdd} disabled={createNode.isPending}>
+              {createNode.isPending ? "添加中..." : "添加"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {selectedSubject && treeData ? (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* 知识树主体 */}
@@ -277,6 +494,9 @@ export default function KnowledgeTree() {
                         onUpdateMastery={(id, mastery) =>
                           updateMastery.mutate({ id, mastery })
                         }
+                        onEdit={handleEdit}
+                        onAddChild={handleAddChild}
+                        onDelete={handleDelete}
                       />
                     ))}
                   </div>
