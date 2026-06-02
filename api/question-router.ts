@@ -587,6 +587,17 @@ export const questionRouter = createRouter({
       return { success: true };
     }),
 
+  // 删除错题记录
+  deleteWrongAnswer: authedQuery
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await getDb()
+        .delete(wrongAnswers)
+        .where(and(eq(wrongAnswers.id, input.id), eq(wrongAnswers.userId, ctx.user.id)));
+
+      return { success: true };
+    }),
+
   // 获取答题统计
   getStats: authedQuery.query(async ({ ctx }) => {
     const db = getDb();

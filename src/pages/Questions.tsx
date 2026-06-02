@@ -157,6 +157,15 @@ export default function Questions() {
     onSuccess: () => utils.question.getWrongAnswers.invalidate(),
   });
 
+  // 删除错题记录
+  const deleteWrongAnswer = trpc.question.deleteWrongAnswer.useMutation({
+    onSuccess: () => {
+      utils.question.getWrongAnswers.invalidate();
+      utils.question.getStats.invalidate();
+      toast.success("错题记录已删除");
+    },
+  });
+
   // 删除题目
   const deleteQuestion = trpc.question.delete.useMutation({
     onSuccess: () => {
@@ -1615,6 +1624,18 @@ export default function Questions() {
                           }}
                         >
                           <RotateCcw className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-400 hover:text-red-300"
+                          onClick={() => {
+                            if (confirm("确定删除这条错题记录？")) {
+                              deleteWrongAnswer.mutate({ id: w.id });
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>

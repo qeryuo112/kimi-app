@@ -162,6 +162,7 @@ export const studyLogs = mysqlTable("study_logs", {
   attachments: text("attachments"), // 附件 JSON
   aiFeedback: text("aiFeedback"), // AI反馈
   aiTestScore: int("aiTestScore"), // AI测试得分 0-100
+  snapshot: text("snapshot"), // JSON：删除时需要恢复的状态快照
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -385,7 +386,7 @@ export type InsertDailyTodo = typeof dailyTodos.$inferInsert;
 export const reviewSchedules = mysqlTable("review_schedules", {
   id: serial("id").primaryKey(),
   userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
-  planId: bigint("planId", { mode: "number", unsigned: true }).notNull(),
+  planId: bigint("planId", { mode: "number", unsigned: true }),
   nodeTitle: varchar("nodeTitle", { length: 255 }).notNull(), // 知识点标题
   subjectTitle: varchar("subjectTitle", { length: 255 }).notNull(),
   originalStudyDate: varchar("originalStudyDate", { length: 20 }).notNull(), // 首次学习日期

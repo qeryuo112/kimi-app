@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/providers/trpc";
 import { LOGIN_PATH } from "@/const";
@@ -40,6 +40,12 @@ import {
   Sparkles,
   CheckCircle,
   XCircle,
+  CheckCircle2,
+  AlertTriangle,
+  Upload,
+  X,
+  FileText,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -60,10 +66,31 @@ const moodIcons: Record<string, { icon: React.ReactNode; label: string; color: s
   bad: { icon: <Frown className="h-4 w-4" />, label: "不佳", color: "text-red-400" },
 };
 
+interface TestQuestion {
+  id: string;
+  content: string;
+  options?: Array<{ label: string; text: string }>;
+  correctAnswer: string;
+  explanation: string;
+  knowledgePoint: string;
+  questionType?: "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed";
+}
+
 export default function StudyLogs() {
   const { isAuthenticated } = useAuth({
     redirectOnUnauthenticated: true,
     redirectPath: LOGIN_PATH,
+  });
+
+  // ===== 表单状态（必须在查询之前定义） =====
+  const [form, setForm] = useState({
+    subjectId: undefined as number | undefined,
+    nodeId: undefined as number | undefined,
+    title: "",
+    content: "",
+    duration: 30,
+    mood: "normal" as "great" | "good" | "normal" | "tired" | "bad",
+    tags: "",
   });
 
   const utils = trpc.useUtils();
@@ -79,6 +106,12 @@ export default function StudyLogs() {
   const { data: stats } = trpc.study.getStats.useQuery(
     { days: 14 },
     { enabled: isAuthenticated }
+  );
+
+  // 获取知识点列表（根据选中的科目过滤）
+  const { data: knowledgeTree } = trpc.knowledge.getTree.useQuery(
+    { subjectId: form.subjectId || 0 },
+    { enabled: !!form.subjectId && isAuthenticated }
   );
 
   const createLog = trpc.study.create.useMutation({
@@ -110,7 +143,7 @@ export default function StudyLogs() {
     onError: (err) => toast.error(err.message),
   });
 
-  // AI生成测试题
+  // AI生成测试题（针对已有记录）
   const aiGenerateTests = trpc.study.aiGenerateTests.useMutation({
     onSuccess: (data) => {
       toast.success(`生成 ${data.questions.length} 道测试题`);
@@ -118,31 +151,70 @@ export default function StudyLogs() {
     onError: (err) => toast.error(err.message),
   });
 
+  // 新：匹配题库题目
+  const matchQuestions = trpc.study.matchQuestions.useMutation({
+    onSuccess: (data) => {
+      setTestQuestions(data.questions);
+      setTestAnswers({});
+      setTestStep("testing");
+      toast.success(data.source === "database" ? `从题库匹配 ${data.questions.length} 道题目` : `AI生成 ${data.questions.length} 道题目`);
+    },
+    onError: (err) => {
+      setTestStep("testing");
+      toast.error(err.message);
+      setTestOpen(false);
+    },
+  });
+
+  // 新：提交学习测试
+  const submitStudyTest = trpc.study.submitStudyTest.useMutation({
+    onSuccess: (data) => {
+      setTestResult(data);
+      setTestStep("result");
+      utils.study.list.invalidate();
+      utils.study.getStats.invalidate();
+      utils.subject.list.invalidate();
+      utils.knowledge.list.invalidate();
+      utils.skill.list.invalidate();
+      utils.todo.getReviews.invalidate();
+    },
+    onError: (err) => {
+      toast.error(err.message);
+    },
+  });
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [evaluatingId, setEvaluatingId] = useState<number | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
-  const [testQuestions, setTestQuestions] = useState<any[]>([]);
+  const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
   const [currentTestIndex, setCurrentTestIndex] = useState(0);
   const [testAnswers, setTestAnswers] = useState<Record<number, string>>({});
   const [testResults, setTestResults] = useState<Record<number, any>>({});
   const [showTest, setShowTest] = useState(false);
-  const [form, setForm] = useState({
-    subjectId: undefined as number | undefined,
-    title: "",
-    content: "",
-    duration: 30,
-    quality: 3,
-    mood: "normal" as "great" | "good" | "normal" | "tired" | "bad",
-    tags: "",
-  });
+
+  // 新：测试流程状态
+  const [testOpen, setTestOpen] = useState(false);
+  const [testStep, setTestStep] = useState<"loading" | "testing" | "result">("loading");
+  const [newTestQuestions, setNewTestQuestions] = useState<TestQuestion[]>([]);
+  const [newTestAnswers, setNewTestAnswers] = useState<Record<string, string>>({});
+  const [testResult, setTestResult] = useState<any>(null);
+
+  // 题目配置 + 文件上传
+  const [testConfigOpen, setTestConfigOpen] = useState(false);
+  const [testQuestionType, setTestQuestionType] = useState<"single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed">("mixed");
+  const [testQuestionCount, setTestQuestionCount] = useState(5);
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const { data: settings } = trpc.settings.get.useQuery();
 
   const resetForm = () => {
     setForm({
       subjectId: undefined,
+      nodeId: undefined,
       title: "",
       content: "",
       duration: 30,
-      quality: 3,
       mood: "normal",
       tags: "",
     });
@@ -155,6 +227,135 @@ export default function StudyLogs() {
     }
     createLog.mutate(form);
   };
+
+  // 新：保存并测试（先打开配置对话框）
+  const handleSaveAndTest = () => {
+    if (!form.title.trim()) {
+      toast.error("请输入学习标题");
+      return;
+    }
+    if (!form.subjectId && !form.nodeId) {
+      toast.error("请至少选择科目或知识点");
+      return;
+    }
+
+    setIsDialogOpen(false);
+    setTestConfigOpen(true);
+    setTestQuestionType("mixed");
+    setTestQuestionCount(5);
+    setUploadedFiles([]);
+  };
+
+  // 从配置对话框开始测试
+  const handleStartTest = () => {
+    setTestConfigOpen(false);
+    setTestOpen(true);
+    setTestStep("loading");
+    setNewTestQuestions([]);
+    setNewTestAnswers({});
+    setTestResult(null);
+
+    console.log("[StudyLogs] handleStartTest", {
+      subjectId: form.subjectId,
+      nodeId: form.nodeId,
+      questionType: testQuestionType,
+      count: testQuestionCount,
+      fileCount: uploadedFiles.length,
+    });
+
+    matchQuestions.mutate({
+      subjectId: form.subjectId,
+      nodeId: form.nodeId,
+      count: testQuestionCount,
+      questionType: testQuestionType,
+      fileUrls: uploadedFiles.length > 0 ? uploadedFiles.map((f) => f.url) : undefined,
+    });
+  };
+
+  // 文件上传
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileServerUrl = settings?.fileServerUrl?.trim();
+    if (!fileServerUrl) {
+      toast.error("请先在设置中配置文件上传服务器地址");
+      return;
+    }
+
+    setIsUploading(true);
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast.error(`${file.name} 上传失败: ${err.error || res.statusText}`);
+          continue;
+        }
+        const data = await res.json();
+        if (data.url) {
+          setUploadedFiles((prev) => [...prev, { url: data.url, name: file.name }]);
+          toast.success(`${file.name} 上传成功`);
+        }
+      } catch (err: any) {
+        toast.error(`${file.name} 上传失败: ${err.message}`);
+      }
+    }
+    setIsUploading(false);
+    e.target.value = "";
+  };
+
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // 新：提交测试答案
+  const handleSubmitTest = () => {
+    const unanswered = newTestQuestions.filter((q) => !newTestAnswers[q.id]);
+    if (unanswered.length > 0) {
+      if (!confirm(`还有 ${unanswered.length} 道题未作答，确定提交吗？`)) return;
+    }
+
+    console.log("[StudyLogs] handleSubmitTest 开始", {
+      subjectId: form.subjectId,
+      nodeId: form.nodeId,
+      title: form.title,
+      questionCount: newTestQuestions.length,
+    });
+
+    submitStudyTest.mutate({
+      subjectId: form.subjectId,
+      nodeId: form.nodeId,
+      title: form.title,
+      content: form.content,
+      duration: form.duration,
+      mood: form.mood,
+      questions: newTestQuestions.map((q) => ({
+        id: q.id,
+        content: q.content,
+        correctAnswer: q.correctAnswer,
+        explanation: q.explanation,
+        knowledgePoint: q.knowledgePoint,
+        questionType: q.questionType || "single_choice",
+      })),
+      answers: newTestQuestions.map((q) => ({
+        questionId: q.id,
+        userAnswer: newTestAnswers[q.id] || "",
+      })),
+    });
+  };
+
+  // 当 matchQuestions 成功时同步题目
+  useEffect(() => {
+    if (matchQuestions.data?.questions) {
+      setNewTestQuestions(matchQuestions.data.questions);
+    }
+  }, [matchQuestions.data]);
 
   // 柱状图数据
   const chartData =
@@ -197,23 +398,47 @@ export default function StudyLogs() {
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">关联科目</label>
-                <Select
-                  value={form.subjectId ? String(form.subjectId) : ""}
-                  onValueChange={(v) => setForm({ ...form, subjectId: Number(v) })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择科目（可选）" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {subjects?.map((s) => (
-                      <SelectItem key={s.id} value={String(s.id)}>
-                        {s.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">关联科目</label>
+                  <Select
+                    value={form.subjectId ? String(form.subjectId) : ""}
+                    onValueChange={(v) => {
+                      const id = Number(v);
+                      setForm({ ...form, subjectId: id, nodeId: undefined });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择科目" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {subjects?.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          {s.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">知识点</label>
+                  <Select
+                    value={form.nodeId ? String(form.nodeId) : ""}
+                    onValueChange={(v) => setForm({ ...form, nodeId: Number(v) })}
+                    disabled={!form.subjectId || !knowledgeTree?.nodes?.length}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={form.subjectId ? "选择知识点" : "先选科目"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {knowledgeTree?.nodes?.map((n) => (
+                        <SelectItem key={n.id} value={String(n.id)}>
+                          {n.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -228,35 +453,23 @@ export default function StudyLogs() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">质量 (1-5)</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={5}
-                    value={form.quality}
-                    onChange={(e) =>
-                      setForm({ ...form, quality: Number(e.target.value) })
-                    }
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">心情</label>
-                <div className="flex gap-2">
-                  {Object.entries(moodIcons).map(([key, { icon, label, color }]) => (
-                    <button
-                      key={key}
-                      className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg border transition-all ${
-                        form.mood === key
-                          ? "border-primary bg-primary/10"
-                          : "border-border hover:bg-secondary"
-                      }`}
-                      onClick={() => setForm({ ...form, mood: key as typeof form.mood })}
-                    >
-                      <span className={color}>{icon}</span>
-                      <span className="text-[10px] text-muted-foreground">{label}</span>
-                    </button>
-                  ))}
+                  <label className="text-sm font-medium">心情</label>
+                  <div className="flex gap-1">
+                    {Object.entries(moodIcons).map(([key, { icon, label, color }]) => (
+                      <button
+                        key={key}
+                        className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg border transition-all ${
+                          form.mood === key
+                            ? "border-primary bg-primary/10"
+                            : "border-border hover:bg-secondary"
+                        }`}
+                        onClick={() => setForm({ ...form, mood: key as typeof form.mood })}
+                      >
+                        <span className={color}>{icon}</span>
+                        <span className="text-[10px] text-muted-foreground">{label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
               <div className="space-y-2">
@@ -269,12 +482,20 @@ export default function StudyLogs() {
                 />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="gap-2">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                 取消
               </Button>
-              <Button onClick={handleCreate} disabled={createLog.isPending}>
-                {createLog.isPending ? "保存中..." : "保存记录"}
+              <Button onClick={handleCreate} disabled={createLog.isPending} variant="outline">
+                {createLog.isPending ? "保存中..." : "仅保存"}
+              </Button>
+              <Button onClick={handleSaveAndTest} disabled={matchQuestions.isPending}>
+                {matchQuestions.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                ) : (
+                  <BrainCircuit className="h-4 w-4 mr-1" />
+                )}
+                保存并测试
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -507,7 +728,7 @@ export default function StudyLogs() {
         </CardContent>
       </Card>
 
-      {/* 测试题弹窗 */}
+      {/* 已有记录的测试题弹窗 */}
       <Dialog open={showTest} onOpenChange={setShowTest}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
           <DialogHeader>
@@ -596,7 +817,6 @@ export default function StudyLogs() {
                       if (currentTestIndex < testQuestions.length - 1) {
                         setCurrentTestIndex(currentTestIndex + 1);
                       } else {
-                        // 计算总分
                         const total = Object.values(testResults).filter((r: any) => r.isCorrect).length;
                         const score = Math.round((total / testQuestions.length) * 100);
                         toast.success(`测试完成！得分: ${score}分`);
@@ -617,6 +837,244 @@ export default function StudyLogs() {
               <CheckCircle className="h-10 w-10 text-green-400 mx-auto mb-3" />
               <p>测试完成！</p>
               <Button className="mt-3" onClick={() => setShowTest(false)}>关闭</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 题目配置弹窗 */}
+      <Dialog open={testConfigOpen} onOpenChange={setTestConfigOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-primary" />
+              配置测试
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* 题型和数量 */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">题目类型</label>
+                <select
+                  value={testQuestionType}
+                  onChange={(e) => setTestQuestionType(e.target.value as any)}
+                  className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm"
+                >
+                  <option value="single_choice">单选题</option>
+                  <option value="multiple_choice">多选题</option>
+                  <option value="fill_blank">填空题</option>
+                  <option value="short_answer">简答题</option>
+                  <option value="essay">论述题</option>
+                  <option value="mixed">混合题型</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">题目数量</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={testQuestionCount}
+                    onChange={(e) => setTestQuestionCount(parseInt(e.target.value) || 5)}
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground">道</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 文件上传 */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">上传学习材料（可选）</label>
+              <Input
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                onChange={handleFileUpload}
+                disabled={isUploading}
+              />
+              {isUploading && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  上传中...
+                </p>
+              )}
+              {uploadedFiles.length > 0 && (
+                <div className="space-y-1.5">
+                  {uploadedFiles.map((file, idx) => (
+                    <div key={idx} className="flex items-center gap-2 text-sm p-2 rounded bg-secondary/30">
+                      <FileText className="h-4 w-4 text-primary" />
+                      <span className="flex-1 truncate">{file.name}</span>
+                      <Button size="sm" variant="ghost" onClick={() => removeFile(idx)} className="h-6 w-6 p-0">
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                上传PDF/Word/图片等，AI将基于文件内容出题。不上传则从题库匹配。
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setTestConfigOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleStartTest} disabled={matchQuestions.isPending}>
+              {matchQuestions.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <BrainCircuit className="h-4 w-4 mr-1" />}
+              开始测试
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 新：学习测试弹窗（所有题目同时显示） */}
+      <Dialog open={testOpen} onOpenChange={setTestOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BrainCircuit className="h-5 w-5 text-primary" />
+              AI学习测试
+            </DialogTitle>
+          </DialogHeader>
+
+          {testStep === "loading" && (
+            <div className="text-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+              <p className="text-muted-foreground">AI正在出题...</p>
+            </div>
+          )}
+
+          {testStep === "testing" && (
+            <div className="space-y-4">
+              {newTestQuestions.map((q, idx) => {
+                const isMultiple = q.questionType === "multiple_choice";
+                const currentAnswer = newTestAnswers[q.id] || "";
+                const selectedLabels = isMultiple
+                  ? currentAnswer.split("").filter(Boolean)
+                  : [currentAnswer].filter(Boolean);
+
+                const toggleOption = (label: string) => {
+                  if (isMultiple) {
+                    const newLabels = selectedLabels.includes(label)
+                      ? selectedLabels.filter((l) => l !== label)
+                      : [...selectedLabels, label].sort();
+                    setNewTestAnswers({ ...newTestAnswers, [q.id]: newLabels.join("") });
+                  } else {
+                    setNewTestAnswers({ ...newTestAnswers, [q.id]: label });
+                  }
+                };
+
+                return (
+                  <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
+                    <p className="text-sm font-medium mb-2">
+                      <span className="text-primary mr-1">{idx + 1}.</span>
+                      {q.content}
+                    </p>
+                    {isMultiple && (
+                      <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
+                        <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
+                        多选题：可选择多个答案
+                      </p>
+                    )}
+                    {q.options && q.options.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {q.options.map((opt) => {
+                          const isSelected = selectedLabels.includes(opt.label);
+                          return (
+                            <button
+                              key={opt.label}
+                              onClick={() => toggleOption(opt.label)}
+                              className={`w-full text-left p-2 rounded-lg border text-sm transition-colors ${
+                                isSelected
+                                  ? "border-primary bg-primary/10"
+                                  : "border-border hover:bg-secondary/30"
+                              }`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <span className={`font-medium mr-2 ${isSelected ? "text-primary" : ""}`}>
+                                  {isMultiple && (
+                                    <span className={`inline-flex items-center justify-center w-5 h-5 border rounded ${isSelected ? "bg-primary border-primary text-white" : "border-border"}`}>
+                                      {isSelected && "✓"}
+                                    </span>
+                                  )}
+                                  {!isMultiple && `${opt.label}.`}
+                                </span>
+                                <span>{opt.text}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <Input
+                        placeholder="请输入你的答案"
+                        value={newTestAnswers[q.id] || ""}
+                        onChange={(e) => setNewTestAnswers({ ...newTestAnswers, [q.id]: e.target.value })}
+                      />
+                    )}
+                    <p className="text-[10px] text-muted-foreground mt-1.5">知识点：{q.knowledgePoint}</p>
+                  </div>
+                );
+              })}
+
+              <div className="flex gap-2">
+                <Button className="flex-1" onClick={handleSubmitTest} disabled={submitStudyTest.isPending}>
+                  {submitStudyTest.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                  提交答案
+                </Button>
+                <Button variant="outline" onClick={() => setTestOpen(false)}>取消</Button>
+              </div>
+            </div>
+          )}
+
+          {testStep === "result" && testResult && (
+            <div className="space-y-4">
+              <div className={`p-4 rounded-lg text-center ${testResult.mastery >= 70 ? "bg-green-500/10 border border-green-500/30" : testResult.mastery >= 50 ? "bg-yellow-500/10 border border-yellow-500/30" : "bg-red-500/10 border border-red-500/30"}`}>
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  {testResult.mastery >= 70 ? <CheckCircle2 className="h-6 w-6 text-green-400" /> : <AlertTriangle className="h-6 w-6 text-yellow-400" />}
+                  <span className="text-lg font-bold">掌握度 {testResult.mastery}%</span>
+                </div>
+                <p className="text-sm">{testResult.feedback}</p>
+                <p className="text-xs text-muted-foreground mt-1">质量评分：{testResult.quality}/5 · 答对 {testResult.correctCount}/{testResult.totalCount} 题 · 下次复习：{testResult.nextReviewIn}天后</p>
+              </div>
+
+              {testResult.weakPoints && testResult.weakPoints.length > 0 && (
+                <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                  <p className="text-sm font-medium text-red-400 flex items-center gap-1">
+                    <XCircle className="h-4 w-4" />
+                    薄弱知识点
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {testResult.weakPoints.map((p: string, i: number) => (
+                      <Badge key={i} variant="secondary" className="text-[10px]">{p}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {testResult.suggestions && testResult.suggestions.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">AI建议</p>
+                  {testResult.suggestions.map((s: string, i: number) => (
+                    <p key={i} className="text-xs text-muted-foreground flex items-start gap-1">
+                      <span className="text-primary mt-0.5">•</span>
+                      {s}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              <Button className="w-full" onClick={() => {
+                setTestOpen(false);
+                setTestResult(null);
+                resetForm();
+              }}>
+                完成
+              </Button>
             </div>
           )}
         </DialogContent>
