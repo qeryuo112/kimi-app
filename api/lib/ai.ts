@@ -1888,6 +1888,7 @@ export async function recognizeQuestionsFromUrls(
 export async function aiAssistantChat(
   messages: Array<{ role: string; content: string }>,
   contextData?: Record<string, unknown>,
+  fileUrls?: string[],
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
@@ -1901,6 +1902,7 @@ export async function aiAssistantChat(
 4. 帮助制定学习计划
 5. 回答学习相关的问题
 6. 可以调用系统功能修改数据（如更新学习记录、调整技能等级等）
+7. 分析用户上传的文件内容并基于文件回答问题
 
 当用户要求修改数据时，请返回JSON格式的操作指令，包含action字段：
 - update_skill: 更新技能等级
@@ -1911,15 +1913,37 @@ export async function aiAssistantChat(
 你当前可以访问的系统数据：
 ${contextData ? JSON.stringify(contextData, null, 2) : "暂无上下文数据"}
 
-请以专业、鼓励性的语气回复。如果是数据操作请求，请在回复末尾附上JSON指令。`;
+请以专业、鼓励性的语气回复。如果是数据操作请求，请在回复末尾附上JSON指令。如果用户上传了文件，请仔细分析文件内容后回答。`;
 
-  const chatMessages: KimiMessage[] = [
-    { role: "system", content: systemPrompt },
-    ...messages.map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    })),
-  ];
+  const chatMessages: KimiMessage[] = [{ role: "system", content: systemPrompt }];
+
+  // 转换历史消息
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    const isLastUserMessage = m.role === "user" && i === messages.length - 1;
+
+    if (isLastUserMessage && fileUrls && fileUrls.length > 0) {
+      // 最后一条用户消息：插入 file_url 内容块
+      const contentBlocks: KimiContent[] = fileUrls.map((url) => {
+        const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
+        const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+        if (imageExts.includes(ext)) {
+          return { type: "image_url", image_url: { url } };
+        }
+        return { type: "file_url", file_url: { url } };
+      });
+      contentBlocks.push({ type: "text", text: m.content || "请分析以上文件内容" });
+      chatMessages.push({
+        role: "user",
+        content: contentBlocks,
+      } as KimiMessage);
+    } else {
+      chatMessages.push({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      });
+    }
+  }
 
   const result = await chatWithAI(chatMessages, 0.7, apiKey, apiUrl, modelName, false, undefined, true);
   return result;

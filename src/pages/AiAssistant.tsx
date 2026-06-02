@@ -18,6 +18,8 @@ import {
   Zap,
   BrainCircuit,
   Lightbulb,
+  Paperclip,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -68,7 +70,13 @@ export default function AiAssistant() {
 
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ url: string; name: string }>>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const { data: settings } = trpc.settings.get.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -76,15 +84,58 @@ export default function AiAssistant() {
     }
   }, [conversation, isTyping]);
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileServerUrl = settings?.fileServerUrl?.trim();
+    if (!fileServerUrl) {
+      toast.error("请先在设置中配置文件上传服务器地址");
+      return;
+    }
+
+    setIsUploading(true);
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast.error(`上传失败: ${err.error || res.statusText}`);
+          continue;
+        }
+        const data = await res.json();
+        if (data.url) {
+          setAttachedFiles((prev) => [...prev, { url: data.url, name: file.name }]);
+          toast.success(`${file.name} 上传成功`);
+        }
+      } catch (err: any) {
+        toast.error(`上传失败: ${err.message}`);
+      }
+    }
+    setIsUploading(false);
+    e.target.value = "";
+  };
+
+  const removeAttachedFile = (index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSend = () => {
-    if (!input.trim()) return;
+    if (!input.trim() && attachedFiles.length === 0) return;
     setIsTyping(true);
     chatMutation.mutate({
       sessionId,
       message: input,
       contextType: "general",
+      fileUrls: attachedFiles.map((f) => f.url),
     });
     setInput("");
+    setAttachedFiles([]);
   };
 
   const handleQuickAction = (label: string) => {
@@ -233,21 +284,67 @@ export default function AiAssistant() {
 
         {/* 输入区域 */}
         <div className="p-4 border-t border-border bg-card/50">
-          <div className="max-w-4xl mx-auto flex gap-2">
-            <Input
-              placeholder="输入消息，AI可以帮你分析数据、生成计划、评估能力..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              className="flex-1"
-            />
-            <Button
-              onClick={handleSend}
-              disabled={!input.trim() || chatMutation.isPending}
-              className="gap-2"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+          <div className="max-w-4xl mx-auto">
+            {/* 已上传文件列表 */}
+            {attachedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {attachedFiles.map((file, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-1 bg-secondary/50 rounded-md px-2 py-1 text-xs"
+                  >
+                    <span className="truncate max-w-[200px]">{file.name}</span>
+                    <button
+                      onClick={() => removeAttachedFile(idx)}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.txt,.md,.png,.jpg,.jpeg"
+                onChange={handleFileUpload}
+                className="hidden"
+                id="ai-file-upload"
+              />
+              <label htmlFor="ai-file-upload">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  disabled={isUploading}
+                  asChild
+                >
+                  <span>
+                    {isUploading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Paperclip className="h-4 w-4" />
+                    )}
+                  </span>
+                </Button>
+              </label>
+              <Input
+                placeholder="输入消息，AI可以帮你分析数据、生成计划、评估能力..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                className="flex-1"
+              />
+              <Button
+                onClick={handleSend}
+                disabled={(!input.trim() && attachedFiles.length === 0) || chatMutation.isPending}
+                className="gap-2 shrink-0"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
           <p className="text-[10px] text-muted-foreground text-center mt-2">
             AI可以访问你的学习数据并进行动态修改

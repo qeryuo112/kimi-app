@@ -28,9 +28,10 @@ export const aiRouter = createRouter({
     .input(
       z.object({
         sessionId: z.string(),
-        message: z.string().min(1),
+        message: z.string(),
         contextType: z.enum(["general", "subject", "skill", "study"]).default("general"),
         contextId: z.number().optional(),
+        fileUrls: z.array(z.string()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -43,6 +44,7 @@ export const aiRouter = createRouter({
         metadata: JSON.stringify({
           contextType: input.contextType,
           contextId: input.contextId,
+          fileUrls: input.fileUrls,
         }),
       });
 
@@ -97,6 +99,7 @@ export const aiRouter = createRouter({
       const response = await aiAssistantChat(
         messages,
         contextData,
+        input.fileUrls,
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined
