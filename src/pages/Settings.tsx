@@ -18,6 +18,7 @@ import {
   Bell,
   Save,
   Loader2,
+  Lock,
 } from "lucide-react";
 
 export default function SettingsPage() {
@@ -68,8 +69,41 @@ export default function SettingsPage() {
     }
   }, [settings]);
 
+  const [pwdForm, setPwdForm] = useState({
+    oldPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+
+  const changePassword = trpc.auth.changePassword.useMutation({
+    onSuccess: () => {
+      toast.success("密码修改成功，请重新登录");
+      setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
+    },
+    onError: (err) => toast.error(err.message || "修改失败"),
+  });
+
   const handleSave = () => {
     updateSettings.mutate(form);
+  };
+
+  const handleChangePassword = () => {
+    if (!pwdForm.oldPassword || !pwdForm.newPassword) {
+      toast.error("请填写完整");
+      return;
+    }
+    if (pwdForm.newPassword !== pwdForm.confirmPassword) {
+      toast.error("两次新密码不一致");
+      return;
+    }
+    if (pwdForm.newPassword.length < 6) {
+      toast.error("新密码至少6位");
+      return;
+    }
+    changePassword.mutate({
+      oldPassword: pwdForm.oldPassword,
+      newPassword: pwdForm.newPassword,
+    });
   };
 
   return (
@@ -270,6 +304,57 @@ export default function SettingsPage() {
                     setForm({ ...form, notifications: checked })
                   }
                 />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 账号安全 */}
+          <Card className="glass glow-card border-border/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Lock className="h-4 w-4 text-primary" />
+                账号安全
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">原密码</label>
+                <Input
+                  type="password"
+                  placeholder="请输入当前密码"
+                  value={pwdForm.oldPassword}
+                  onChange={(e) => setPwdForm({ ...pwdForm, oldPassword: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">新密码</label>
+                <Input
+                  type="password"
+                  placeholder="至少6位"
+                  value={pwdForm.newPassword}
+                  onChange={(e) => setPwdForm({ ...pwdForm, newPassword: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">确认新密码</label>
+                <Input
+                  type="password"
+                  placeholder="再次输入新密码"
+                  value={pwdForm.confirmPassword}
+                  onChange={(e) => setPwdForm({ ...pwdForm, confirmPassword: e.target.value })}
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  onClick={handleChangePassword}
+                  disabled={changePassword.isPending}
+                  variant="outline"
+                >
+                  {changePassword.isPending && (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  )}
+                  修改密码
+                </Button>
               </div>
             </CardContent>
           </Card>
