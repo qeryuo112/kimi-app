@@ -22,7 +22,18 @@ function debugLog(label: string, data?: unknown) {
 
 function debugLogError(label: string, error: unknown) {
   const now = new Date().toISOString();
-  const errMsg = error instanceof Error ? `${error.name}: ${error.message}\n${error.stack}` : String(error);
+  let errMsg: string;
+  if (error instanceof Error) {
+    errMsg = `${error.name}: ${error.message}\n${error.stack}`;
+  } else if (typeof error === "object" && error !== null) {
+    try {
+      errMsg = JSON.stringify(error, null, 2);
+    } catch {
+      errMsg = String(error);
+    }
+  } else {
+    errMsg = String(error);
+  }
   const line = `[${now}] [AI-DEBUG-ERROR] ${label}\n${errMsg}`;
   console.error(line);
   try {
@@ -144,7 +155,7 @@ export async function chatWithAI(
   }
 
   const body: Record<string, unknown> = {
-    model: modelName || "gpt-4o",
+    model: modelName || "glm-4.6v",
     messages,
     temperature,
     max_tokens: 32768,
@@ -806,7 +817,7 @@ export async function generateWeeklyPlan(
 2. 将学习内容细化到周级别
 3. 每周有明确的主题和知识点安排
 4. 考虑知识点的依赖关系（前置知识优先）
-5. 每周聚焦3-4个科目，但**所有科目的知识点最终都必须被安排到具体的周，优先级高的科目优先安排**
+5. **每周所有科目均需安排，所有科目的知识点最终都必须被安排到具体的周，优先级高的科目优先安排**
 6. 每周安排适量的复习时间
 7. 如果用户规定的时间紧张，根据知识点的重要性和难度进行调整分配时间长短，但绝不能跳过任何知识点
 

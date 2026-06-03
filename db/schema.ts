@@ -209,7 +209,7 @@ export const userSettings = mysqlTable("user_settings", {
   userId: bigint("userId", { mode: "number", unsigned: true }).notNull().unique(),
   theme: mysqlEnum("theme", ["light", "dark", "system"]).default("dark").notNull(),
   language: varchar("language", { length: 20 }).default("zh-CN"),
-  aiModel: varchar("aiModel", { length: 100 }).default("kimi"),
+  aiModel: varchar("aiModel", { length: 100 }).default("glm-4.6v"),
   aiApiKey: text("aiApiKey"), // 用户自定义API Key
   aiApiEndpoint: text("aiApiEndpoint"), // 自定义API端点
   fileServerUrl: text("fileServerUrl"), // 文件上传服务器地址（如 http://VPS_IP:3001）
