@@ -9,10 +9,14 @@ interface MathContentProps {
 
 export function MathContent({ content, className = "" }: MathContentProps) {
   const rendered = useMemo(() => {
-    if (!content) return null;
+    console.log("[MathContent] render start", { content: content?.slice(0, 100), contentLength: content?.length, className });
+
+    if (!content) {
+      console.log("[MathContent] content is empty/null, returning null");
+      return null;
+    }
 
     const parts: Array<{ type: "text" | "inline-math" | "block-math"; value: string }> = [];
-    let remaining = content;
 
     // Match block math $$...$$
     const blockRegex = /\$\$([\s\S]*?)\$\$/g;
@@ -30,6 +34,8 @@ export function MathContent({ content, className = "" }: MathContentProps) {
     if (lastIndex < content.length) {
       parts.push({ type: "text", value: content.slice(lastIndex) });
     }
+
+    console.log("[MathContent] after block parse", { blockParts: parts.length, parts: parts.map((p) => ({ type: p.type, value: p.value.slice(0, 50) })) });
 
     // Process text parts for inline math $...$
     const finalParts: typeof parts = [];
@@ -57,10 +63,11 @@ export function MathContent({ content, className = "" }: MathContentProps) {
       }
     }
 
-    return finalParts.map((part, i) => {
+    console.log("[MathContent] after inline parse", { finalParts: finalParts.length, parts: finalParts.map((p) => ({ type: p.type, value: p.value.slice(0, 50) })) });
+
+    const result = finalParts.map((part, i) => {
       if (part.type === "text") {
-        // Render newlines as <br /> for display
-        return (
+        const textEl = (
           <span key={i}>
             {part.value.split("\n").map((line, j) => (
               <span key={j}>
@@ -70,13 +77,16 @@ export function MathContent({ content, className = "" }: MathContentProps) {
             ))}
           </span>
         );
+        return textEl;
       }
 
       try {
+        console.log(`[MathContent] katex.renderToString #${i}`, { type: part.type, latex: part.value });
         const html = katex.renderToString(part.value, {
           throwOnError: false,
           displayMode: part.type === "block-math",
         });
+        console.log(`[MathContent] katex.renderToString #${i} success`, { htmlLength: html.length });
         return (
           <span
             key={i}
@@ -84,11 +94,16 @@ export function MathContent({ content, className = "" }: MathContentProps) {
             className={part.type === "block-math" ? "block my-2" : "inline"}
           />
         );
-      } catch {
+      } catch (err) {
+        console.error(`[MathContent] katex.renderToString #${i} FAILED`, { type: part.type, latex: part.value, error: err instanceof Error ? err.message : String(err) });
         return <span key={i}>{part.value}</span>;
       }
     });
+
+    console.log("[MathContent] render end", { resultCount: result.length });
+    return result;
   }, [content]);
 
+  console.log("[MathContent] JSX return", { hasRendered: !!rendered, renderedCount: rendered?.length });
   return <span className={className}>{rendered}</span>;
 }

@@ -104,6 +104,7 @@ export const questionRouter = createRouter({
 
       // 保存题目到数据库
       const savedQuestions = [];
+      console.log("[question.aiGenerate] 开始保存题目", { count: result.questions.length, firstQuestion: result.questions[0] });
       for (const q of result.questions) {
         // 尝试根据AI识别的学科和知识点匹配本地数据
         let matchedSubjectId = input.subjectId;
@@ -135,25 +136,47 @@ export const questionRouter = createRouter({
           }
         }
 
-        const [{ id }] = await db
-          .insert(questions)
-          .values({
-            userId: ctx.user.id,
-            subjectId: matchedSubjectId,
-            nodeId: matchedNodeId,
-            skillId: input.skillId,
-            questionType: input.questionType,
-            content: q.content,
-            options: q.options ? JSON.stringify(q.options) : null,
-            correctAnswer: q.correctAnswer,
-            explanation: q.explanation,
-            difficulty: q.difficulty,
-            imageUrl: q.imageUrl || null,
-            aiGenerated: true,
-            detectedSubject: q.detectedSubject || null,
-            detectedKnowledgePoint: q.detectedKnowledgePoint || null,
-          })
-          .$returningId();
+        const insertValues = {
+          userId: ctx.user.id,
+          subjectId: matchedSubjectId,
+          nodeId: matchedNodeId,
+          skillId: input.skillId,
+          questionType: input.questionType,
+          content: q.content,
+          options: q.options ? JSON.stringify(q.options) : null,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation,
+          difficulty: q.difficulty,
+          imageUrl: q.imageUrl || null,
+          aiGenerated: true,
+          detectedSubject: q.detectedSubject || null,
+          detectedKnowledgePoint: q.detectedKnowledgePoint || null,
+        };
+        console.log("[question.aiGenerate] 准备插入题目", {
+          content: q.content?.slice(0, 50),
+          optionsType: typeof q.options,
+          options: q.options,
+          optionsJson: insertValues.options,
+          difficulty: q.difficulty,
+          difficultyType: typeof q.difficulty,
+        });
+
+        let insertResult;
+        try {
+          insertResult = await db
+            .insert(questions)
+            .values(insertValues)
+            .$returningId();
+        } catch (insertErr) {
+          console.error("[question.aiGenerate] 插入题目失败", {
+            error: insertErr instanceof Error ? insertErr.message : String(insertErr),
+            stack: insertErr instanceof Error ? insertErr.stack : undefined,
+            insertValues,
+          });
+          throw insertErr;
+        }
+        console.log("[question.aiGenerate] 插入题目成功", { id: insertResult?.[0]?.id });
+        const [{ id }] = insertResult;
 
         savedQuestions.push({ id, ...q, subjectId: matchedSubjectId, nodeId: matchedNodeId });
       }
