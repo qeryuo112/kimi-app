@@ -1,27 +1,30 @@
 import { useMemo } from "react";
+import { trpc } from "@/providers/trpc";
 
-const LOCAL_USER = {
-  id: 1,
-  unionId: "local-user",
-  name: "本地用户",
-  email: "local@example.com",
-  avatar: null,
-  role: "admin" as const,
-  createdAt: new Date(),
-  updatedAt: new Date(),
-  lastSignInAt: new Date(),
-};
+function deleteCookie(name: string) {
+  document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+}
 
-export function useAuth(_opts?: { redirectOnUnauthenticated?: boolean; redirectPath?: string }) {
+export function useAuth() {
+  const utils = trpc.useUtils();
+  const { data: user, isLoading } = trpc.auth.me.useQuery();
+  const logoutMutation = trpc.auth.logout.useMutation({
+    onSuccess: () => {
+      deleteCookie("kimiokc_session");
+      utils.invalidate();
+      window.location.href = "/login";
+    },
+  });
+
   return useMemo(
     () => ({
-      user: LOCAL_USER,
-      isAuthenticated: true,
-      isLoading: false,
+      user: user || null,
+      isAuthenticated: !!user,
+      isLoading,
       error: null,
-      logout: () => {},
-      refresh: () => {},
+      logout: () => logoutMutation.mutate(),
+      refresh: () => utils.auth.me.invalidate(),
     }),
-    [],
+    [user, isLoading, logoutMutation, utils]
   );
 }

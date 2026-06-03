@@ -1,5 +1,9 @@
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import type { User } from "@db/schema";
+import { getDb } from "./queries/connection";
+import { users } from "@db/schema";
+import { eq } from "drizzle-orm";
+import { verifySession } from "./auth-router";
 
 export type TrpcContext = {
   req: Request;
@@ -7,20 +11,31 @@ export type TrpcContext = {
   user?: User;
 };
 
-const LOCAL_USER: User = {
-  id: 1,
-  unionId: "local-user",
-  name: "本地用户",
-  email: "local@example.com",
-  avatar: null,
-  role: "admin",
-  createdAt: new Date(),
-  updatedAt: new Date(),
-  lastSignInAt: new Date(),
-};
-
 export async function createContext(
   opts: FetchCreateContextFnOptions,
 ): Promise<TrpcContext> {
-  return { req: opts.req, resHeaders: opts.resHeaders, user: LOCAL_USER };
+  const req = opts.req;
+
+  // 从 cookie 解析 session token
+  const cookieHeader = req.headers.get("cookie") || "";
+  const tokenMatch = cookieHeader.match(/kimiokc_session=([^;]+)/);
+
+  if (tokenMatch) {
+    const session = verifySession(decodeURIComponent(tokenMatch[1]));
+    if (session) {
+      try {
+        const [user] = await getDb()
+          .select()
+          .from(users)
+          .where(eq(users.id, session.userId));
+        if (user) {
+          return { req, resHeaders: opts.resHeaders, user };
+        }
+      } catch {
+        // 数据库查询失败，继续匿名
+      }
+    }
+  }
+
+  return { req, resHeaders: opts.resHeaders };
 }

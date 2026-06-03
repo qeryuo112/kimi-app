@@ -16,7 +16,10 @@ import {
   Target,
   FileQuestion,
   CheckSquare,
+  LogOut,
 } from "lucide-react";
+import { useEffect } from "react";
+import { useNavigate } from "react-router";
 import type { LucideIcon } from "lucide-react";
 
 interface NavItem {
@@ -40,7 +43,24 @@ const navItems: NavItem[] = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { user, isLoading, isAuthenticated, logout } = useAuth();
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      navigate("/login", { replace: true });
+    }
+  }, [isLoading, isAuthenticated, navigate]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="text-muted-foreground">加载中...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) return null;
 
   return (
     <div className="flex h-screen bg-background">
@@ -109,6 +129,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {user?.email || ""}
               </p>
             </div>
+            <button
+              onClick={logout}
+              className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+              title="退出登录"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       </aside>
