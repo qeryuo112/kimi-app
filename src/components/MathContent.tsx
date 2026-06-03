@@ -1,6 +1,14 @@
 import { useMemo } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
+import { ChemicalStructure } from "./ChemicalStructure";
+
+type PartType = "text" | "inline-math" | "block-math" | "chem";
+
+interface Part {
+  type: PartType;
+  value: string;
+}
 
 interface MathContentProps {
   content: string;
@@ -9,16 +17,11 @@ interface MathContentProps {
 
 export function MathContent({ content, className = "" }: MathContentProps) {
   const rendered = useMemo(() => {
-    console.log("[MathContent] render start", { content: content?.slice(0, 100), contentLength: content?.length, className });
+    if (!content) return null;
 
-    if (!content) {
-      console.log("[MathContent] content is empty/null, returning null");
-      return null;
-    }
+    const parts: Part[] = [];
 
-    const parts: Array<{ type: "text" | "inline-math" | "block-math"; value: string }> = [];
-
-    // Match block math $$...$$
+    // Step 1: Match block math $$...$$
     const blockRegex = /\$\$([\s\S]*?)\$\$/g;
     let match: RegExpExecArray | null;
     let lastIndex = 0;
@@ -30,44 +33,44 @@ export function MathContent({ content, className = "" }: MathContentProps) {
       parts.push({ type: "block-math", value: match[1].trim() });
       lastIndex = match.index + match[0].length;
     }
-
     if (lastIndex < content.length) {
       parts.push({ type: "text", value: content.slice(lastIndex) });
     }
 
-    console.log("[MathContent] after block parse", { blockParts: parts.length, parts: parts.map((p) => ({ type: p.type, value: p.value.slice(0, 50) })) });
-
-    // Process text parts for inline math $...$
-    const finalParts: typeof parts = [];
+    // Step 2: For text parts, match inline math $...$ and \chem{...}
+    const finalParts: Part[] = [];
     for (const part of parts) {
       if (part.type !== "text") {
         finalParts.push(part);
         continue;
       }
 
-      const inlineRegex = /\$([\s\S]*?)\$/g;
-      let inlineMatch: RegExpExecArray | null;
-      let inlineLast = 0;
+      // Combined regex for inline math and chem
+      const combinedRegex = /\$([\s\S]*?)\$|\\chem\{([\s\S]*?)\}/g;
+      let combinedMatch: RegExpExecArray | null;
+      let combinedLast = 0;
       const text = part.value;
 
-      while ((inlineMatch = inlineRegex.exec(text)) !== null) {
-        if (inlineMatch.index > inlineLast) {
-          finalParts.push({ type: "text", value: text.slice(inlineLast, inlineMatch.index) });
+      while ((combinedMatch = combinedRegex.exec(text)) !== null) {
+        if (combinedMatch.index > combinedLast) {
+          finalParts.push({ type: "text", value: text.slice(combinedLast, combinedMatch.index) });
         }
-        finalParts.push({ type: "inline-math", value: inlineMatch[1].trim() });
-        inlineLast = inlineMatch.index + inlineMatch[0].length;
+        if (combinedMatch[1] !== undefined) {
+          finalParts.push({ type: "inline-math", value: combinedMatch[1].trim() });
+        } else if (combinedMatch[2] !== undefined) {
+          finalParts.push({ type: "chem", value: combinedMatch[2].trim() });
+        }
+        combinedLast = combinedMatch.index + combinedMatch[0].length;
       }
 
-      if (inlineLast < text.length) {
-        finalParts.push({ type: "text", value: text.slice(inlineLast) });
+      if (combinedLast < text.length) {
+        finalParts.push({ type: "text", value: text.slice(combinedLast) });
       }
     }
 
-    console.log("[MathContent] after inline parse", { finalParts: finalParts.length, parts: finalParts.map((p) => ({ type: p.type, value: p.value.slice(0, 50) })) });
-
-    const result = finalParts.map((part, i) => {
+    return finalParts.map((part, i) => {
       if (part.type === "text") {
-        const textEl = (
+        return (
           <span key={i}>
             {part.value.split("\n").map((line, j) => (
               <span key={j}>
@@ -77,16 +80,17 @@ export function MathContent({ content, className = "" }: MathContentProps) {
             ))}
           </span>
         );
-        return textEl;
+      }
+
+      if (part.type === "chem") {
+        return <ChemicalStructure key={i} smiles={part.value} className="my-2" />;
       }
 
       try {
-        console.log(`[MathContent] katex.renderToString #${i}`, { type: part.type, latex: part.value });
         const html = katex.renderToString(part.value, {
           throwOnError: false,
           displayMode: part.type === "block-math",
         });
-        console.log(`[MathContent] katex.renderToString #${i} success`, { htmlLength: html.length });
         return (
           <span
             key={i}
@@ -94,16 +98,11 @@ export function MathContent({ content, className = "" }: MathContentProps) {
             className={part.type === "block-math" ? "block my-2" : "inline"}
           />
         );
-      } catch (err) {
-        console.error(`[MathContent] katex.renderToString #${i} FAILED`, { type: part.type, latex: part.value, error: err instanceof Error ? err.message : String(err) });
+      } catch {
         return <span key={i}>{part.value}</span>;
       }
     });
-
-    console.log("[MathContent] render end", { resultCount: result.length });
-    return result;
   }, [content]);
 
-  console.log("[MathContent] JSX return", { hasRendered: !!rendered, renderedCount: rendered?.length });
   return <span className={className}>{rendered}</span>;
 }

@@ -1059,7 +1059,8 @@ export async function generateQuestionsFromFileUrls(
   difficulty: number,
   apiKey?: string,
   apiUrl?: string,
-  modelName?: string
+  modelName?: string,
+  requireChemicalStructure = false
 ): Promise<{
   questions: Array<{
     content: string;
@@ -1070,11 +1071,17 @@ export async function generateQuestionsFromFileUrls(
     imageUrl?: string;
     detectedSubject?: string;
     detectedKnowledgePoint?: string;
+    smiles?: string;
+    inchi?: string;
   }>;
 }> {
   const typeDesc = questionType === "mixed"
     ? "混合题型（自动混合单选、多选、填空、简答等）"
     : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
+
+  const chemHint = requireChemicalStructure
+    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 或 explanation 中用 \\chem{SMILES} 格式标注化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
+    : "";
 
   const systemPrompt = `你是一个专业的出题AI。请仔细阅读用户提供的文件内容，然后根据内容生成高质量的练习题。
 
@@ -1093,7 +1100,7 @@ export async function generateQuestionsFromFileUrls(
 4. 提供详细的答案解析
 5. 每道题标注难度(1-5)
 6. mixed模式下，必须混合至少2种不同题型
-7. **分析文件内容所属的学科，以及每道题目考察的具体知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**
+7. **分析文件内容所属的学科，以及每道题目考察的具体知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**${chemHint}
 
 请返回JSON格式：
 {
@@ -1105,7 +1112,7 @@ export async function generateQuestionsFromFileUrls(
       "explanation": "解析",
       "difficulty": 3,
       "detectedSubject": "识别的学科名称，如'数学'、'物理'、'编程'等",
-      "detectedKnowledgePoint": "识别的具体知识点，如'二次函数'、'牛顿定律'等"
+      "detectedKnowledgePoint": "识别的具体知识点，如'二次函数'、'牛顿定律'等"${requireChemicalStructure ? ',\n      "smiles": "SMILES字符串（化学结构题必填）",\n      "inchi": "InChI标识符（化学结构题必填）"' : ''}
     }
   ]
 }`;
@@ -1153,7 +1160,8 @@ export async function generateQuestions(
   difficulty: number,
   apiKey?: string,
   apiUrl?: string,
-  modelName?: string
+  modelName?: string,
+  requireChemicalStructure = false
 ): Promise<{
   questions: Array<{
     content: string;
@@ -1164,11 +1172,17 @@ export async function generateQuestions(
     imageUrl?: string;
     detectedSubject?: string;
     detectedKnowledgePoint?: string;
+    smiles?: string;
+    inchi?: string;
   }>;
 }> {
   const typeDesc = questionType === "mixed"
     ? "混合题型（自动混合单选、多选、填空、简答等）"
     : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
+
+  const chemHint = requireChemicalStructure
+    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 或 explanation 中用 \\chem{SMILES} 格式标注化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
+    : "";
 
   const systemPrompt = `你是一个专业的出题AI。请根据知识点内容生成高质量的练习题。
 
@@ -1187,7 +1201,7 @@ export async function generateQuestions(
 4. 每道题标注难度(1-5)
 5. 如果题目适合配合图片（如观察图形、图表、示意图等），可以添加imageUrl字段，值为图片描述文字（如"细胞结构示意图"、"二次函数图像"等）
 6. mixed模式下，必须混合至少2种不同题型
-7. **分析题目所属学科和具体考察的知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**
+7. **分析题目所属学科和具体考察的知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**${chemHint}
 
 请返回JSON格式：
 {
@@ -1200,7 +1214,7 @@ export async function generateQuestions(
       "difficulty": 3,
       "imageUrl": "可选：图片描述文字",
       "detectedSubject": "识别的学科名称，如'数学'、'物理'、'编程'等",
-      "detectedKnowledgePoint": "识别的具体知识点，如'二次函数'、'牛顿定律'、'React Hooks'等"
+      "detectedKnowledgePoint": "识别的具体知识点，如'二次函数'、'牛顿定律'、'React Hooks'等"${requireChemicalStructure ? ',\n      "smiles": "SMILES字符串（化学结构题必填）",\n      "inchi": "InChI标识符（化学结构题必填）"' : ''}
     }
   ]
 }`;

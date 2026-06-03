@@ -302,6 +302,8 @@ export const questions = mysqlTable("questions", {
   // AI识别的学科和知识点（用于匹配本地数据）
   detectedSubject: varchar("detectedSubject", { length: 255 }), // AI识别的学科名称
   detectedKnowledgePoint: varchar("detectedKnowledgePoint", { length: 255 }), // AI识别的知识点名称
+  smiles: text("smiles"), // SMILES化学结构字符串
+  inchi: text("inchi"), // InChI化学标识符
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

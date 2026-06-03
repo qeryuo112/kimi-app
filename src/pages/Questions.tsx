@@ -35,6 +35,7 @@ import {
   Clock,
   Eye,
   BrainCircuit,
+  FlaskConical,
 } from "lucide-react";
 
 export default function Questions() {
@@ -57,6 +58,7 @@ export default function Questions() {
     questionType: "single_choice" as const,
     count: 5,
     difficulty: 3,
+    requireChemicalStructure: false,
   });
 
   // AI出题模式切换：text | file
@@ -137,7 +139,7 @@ export default function Questions() {
       toast.success(`成功生成 ${data.questions?.length || 0} 道题目`);
       utils.question.list.invalidate();
       setShowGenerate(false);
-      setGenForm({ topic: "", knowledgeContent: "", questionType: "single_choice", count: 5, difficulty: 3 });
+      setGenForm({ topic: "", knowledgeContent: "", questionType: "single_choice", count: 5, difficulty: 3, requireChemicalStructure: false });
     },
     onError: (err) => {
       toast.error(err.message || "出题失败");
@@ -374,6 +376,7 @@ export default function Questions() {
         questionType: genForm.questionType,
         count: genForm.count,
         difficulty: genForm.difficulty,
+        requireChemicalStructure: genForm.requireChemicalStructure,
       });
     }
   };
@@ -1168,6 +1171,20 @@ export default function Questions() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="require-chem"
+                checked={genForm.requireChemicalStructure}
+                onCheckedChange={(checked) =>
+                  setGenForm({ ...genForm, requireChemicalStructure: checked === true })
+                }
+              />
+              <label htmlFor="require-chem" className="text-sm text-muted-foreground cursor-pointer flex items-center gap-1">
+                <FlaskConical className="h-3.5 w-3.5" />
+                需要化学结构式（键线式）
+              </label>
             </div>
 
             <Button

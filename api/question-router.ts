@@ -59,6 +59,7 @@ export const questionRouter = createRouter({
         subjectId: z.number().optional(),
         nodeId: z.number().optional(),
         skillId: z.number().optional(),
+        requireChemicalStructure: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -88,7 +89,8 @@ export const questionRouter = createRouter({
         input.difficulty,
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
-        setting?.aiModel || undefined
+        setting?.aiModel || undefined,
+        input.requireChemicalStructure || false
       );
 
       // 获取用户的学科和知识点列表，用于AI识别匹配
@@ -151,6 +153,8 @@ export const questionRouter = createRouter({
           aiGenerated: true,
           detectedSubject: q.detectedSubject || null,
           detectedKnowledgePoint: q.detectedKnowledgePoint || null,
+          smiles: (q as any).smiles || null,
+          inchi: (q as any).inchi || null,
         };
         console.log("[question.aiGenerate] 准备插入题目", {
           content: q.content?.slice(0, 50),
@@ -195,6 +199,7 @@ export const questionRouter = createRouter({
         subjectId: z.number().optional(),
         nodeId: z.number().optional(),
         skillId: z.number().optional(),
+        requireChemicalStructure: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -211,7 +216,8 @@ export const questionRouter = createRouter({
         input.difficulty,
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
-        setting?.aiModel || undefined
+        setting?.aiModel || undefined,
+        input.requireChemicalStructure || false
       );
 
       // 获取用户的学科和知识点列表，用于AI识别匹配
