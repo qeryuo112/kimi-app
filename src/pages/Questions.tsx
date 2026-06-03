@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { MathContent } from "@/components/MathContent";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -509,37 +510,7 @@ export default function Questions() {
     5: { label: "困难", color: "bg-red-500/20 text-red-400" },
   };
 
-  const renderLatexText = (text: string) => {
-    if (!text) return text;
-    // 处理 \dot{x} 格式，转换为带点的字符
-    let processed = text
-      .replace(/\\dot\{(.)\}/g, '<span class="border-b border-current">$1̇</span>')
-      .replace(/\\frac\{(.*?)\}\{(.*?)\}/g, '($1/$2)')
-      .replace(/\\sqrt\{(.*?)\}/g, '√($1)')
-      .replace(/\\times/g, '×')
-      .replace(/\\div/g, '÷')
-      .replace(/\\pm/g, '±')
-      .replace(/\\neq/g, '≠')
-      .replace(/\\le/g, '≤')
-      .replace(/\\ge/g, '≥')
-      .replace(/\\infty/g, '∞')
-      .replace(/\\pi/g, 'π')
-      .replace(/\\alpha/g, 'α')
-      .replace(/\\beta/g, 'β')
-      .replace(/\\gamma/g, 'γ')
-      .replace(/\\theta/g, 'θ')
-      .replace(/\\Delta/g, 'Δ')
-      .replace(/\\sum/g, 'Σ')
-      .replace(/\\int/g, '∫')
-      .replace(/\\to/g, '→')
-      .replace(/\\rightarrow/g, '→')
-      .replace(/\\leftarrow/g, '←')
-      .replace(/\\cdot/g, '·')
-      .replace(/\\dots/g, '…')
-      .replace(/\\ldots/g, '…')
-      .replace(/\\cdots/g, '⋯');
-    return <span dangerouslySetInnerHTML={{ __html: processed }} />;
-  };
+  // 旧的 renderLatexText 已废弃，使用 MathContent 组件替代
 
   const renderQuestionCard = (q: any, _showAnswer = true, selectable = false) => {
     const isShowingAnswer = showAnswerMap[q.id];
@@ -626,7 +597,7 @@ export default function Questions() {
               )}
             </div>
           )}
-          <p className="text-sm font-medium mb-3">{q.content}</p>
+          <MathContent content={q.content} className="text-sm font-medium mb-3" />
           {q.options && (
             <div className="space-y-1.5 mb-3">
               {(() => {
@@ -635,7 +606,7 @@ export default function Questions() {
                   return opts.map((opt: any) => (
                     <div key={opt.label} className="flex items-center gap-2 text-sm">
                       <span className="font-medium text-primary">{opt.label}.</span>
-                      <span>{renderLatexText(opt.text)}</span>
+                      <MathContent content={opt.text} />
                     </div>
                   ));
                 } catch {
@@ -663,7 +634,7 @@ export default function Questions() {
           {isShowingAnswer && q.explanation && (
             <div className="text-sm text-muted-foreground mt-2">
               <span className="font-medium">解析：</span>
-              {q.explanation}
+              <MathContent content={q.explanation} />
             </div>
           )}
         </CardContent>
@@ -711,7 +682,14 @@ export default function Questions() {
                 value={editForm.content}
                 onChange={(e) => setEditForm({ ...editForm, content: e.target.value })}
                 className="min-h-[100px]"
+                placeholder="支持 LaTeX 公式，如 $E=mc^2$、$\\frac{a}{b}$、$$\\int_0^1 x dx$$"
               />
+              {editForm.content && (
+                <div className="mt-2 p-3 rounded-lg bg-secondary/30 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1">预览：</p>
+                  <MathContent content={editForm.content} />
+                </div>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium">选项</label>
@@ -763,7 +741,14 @@ export default function Questions() {
                 value={editForm.explanation}
                 onChange={(e) => setEditForm({ ...editForm, explanation: e.target.value })}
                 className="min-h-[60px]"
+                placeholder="支持 LaTeX 公式"
               />
+              {editForm.explanation && (
+                <div className="mt-2 p-3 rounded-lg bg-secondary/30 border border-border">
+                  <p className="text-xs text-muted-foreground mb-1">预览：</p>
+                  <MathContent content={editForm.explanation} />
+                </div>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium">题目图片</label>
@@ -894,7 +879,7 @@ export default function Questions() {
                           onChange={() => {}}
                         />
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm truncate">{q.content}</p>
+                          <p className="text-sm truncate"><MathContent content={q.content} /></p>
                           <div className="flex gap-1 mt-1">
                             <Badge variant="outline" className="text-[10px]">
                               {questionTypeMap[q.questionType]}
@@ -1337,7 +1322,7 @@ export default function Questions() {
                           </Badge>
                         )}
                       </div>
-                      <p className="text-sm font-medium mb-2">{q.content}</p>
+                      <MathContent content={q.content} className="text-sm font-medium mb-2" />
                       {q.options && (
                         <div className="space-y-1 mb-2">
                           {(() => {
@@ -1346,7 +1331,7 @@ export default function Questions() {
                               return opts.map((opt: any) => (
                                 <div key={opt.label} className="flex items-center gap-2 text-sm">
                                   <span className="font-medium text-primary">{opt.label}.</span>
-                                  {renderLatexText(opt.text)}
+                                  <MathContent content={opt.text} />
                                 </div>
                               ));
                             } catch {
@@ -1360,7 +1345,8 @@ export default function Questions() {
                       </div>
                       {q.explanation && (
                         <div className="text-sm text-muted-foreground mt-1">
-                          <span className="font-medium">解析：</span>{q.explanation}
+                          <span className="font-medium">解析：</span>
+                          <MathContent content={q.explanation} />
                         </div>
                       )}
                     </CardContent>
@@ -1393,7 +1379,7 @@ export default function Questions() {
                 )}
               </div>
             )}
-            <p className="font-medium">{currentQuestion.content}</p>
+            <MathContent content={currentQuestion.content} className="font-medium" />
             {currentQuestion.questionType === "multiple_choice" && (
               <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
                 <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
@@ -1445,7 +1431,7 @@ export default function Questions() {
                               )}
                               {!isMultiple && `${opt.label}.`}
                             </span>
-                            <span>{renderLatexText(opt.text)}</span>
+                            <MathContent content={opt.text} />
                           </div>
                         </button>
                       );
@@ -1491,7 +1477,7 @@ export default function Questions() {
                 {answerResult.explanation && (
                   <p className="text-sm text-muted-foreground mt-2">
                     <span className="font-medium">解析：</span>
-                    {answerResult.explanation}
+                    <MathContent content={answerResult.explanation} />
                   </p>
                 )}
               </div>
@@ -1645,7 +1631,7 @@ export default function Questions() {
                     </div>
                     {w.question && (
                       <>
-                        <p className="text-sm font-medium mb-2">{w.question.content}</p>
+                        <MathContent content={w.question.content} className="text-sm font-medium mb-2" />
                         <div className="text-sm text-muted-foreground">
                           <span className="text-red-400">你的答案：</span>
                           {w.userAnswer}
@@ -1657,7 +1643,7 @@ export default function Questions() {
                         {w.question.explanation && (
                           <p className="text-sm text-muted-foreground mt-2">
                             <span className="font-medium">解析：</span>
-                            {w.question.explanation}
+                            <MathContent content={w.question.explanation} />
                           </p>
                         )}
                       </>
@@ -1927,7 +1913,7 @@ export default function Questions() {
                         <div className="flex items-start gap-3">
                           <span className="text-sm font-medium text-primary">{idx + 1}.</span>
                           <div className="flex-1">
-                            <p className="text-sm">{q.content}</p>
+                            <MathContent content={q.content} className="text-sm" />
                             {q.options && (
                               <div className="mt-2 space-y-1">
                                 {(() => {
