@@ -1080,7 +1080,7 @@ export async function generateQuestionsFromFileUrls(
     : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
 
   const chemHint = requireChemicalStructure
-    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 或 explanation 中用 \\chem{SMILES} 格式标注化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
+    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 和 options 中用 \\chem{SMILES} 格式嵌入化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）。选项的 text 字段中必须包含 \\chem{SMILES}，不能只写文字描述。\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
     : "";
 
   const systemPrompt = `你是一个专业的出题AI。请仔细阅读用户提供的文件内容，然后根据内容生成高质量的练习题。
@@ -1182,7 +1182,7 @@ export async function generateQuestions(
     : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
 
   const chemHint = requireChemicalStructure
-    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 或 explanation 中用 \\chem{SMILES} 格式标注化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
+    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 和 options 中用 \\chem{SMILES} 格式嵌入化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）。选项的 text 字段中必须包含 \\chem{SMILES}，不能只写文字描述。\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
     : "";
 
   const systemPrompt = `你是一个专业的出题AI。请根据知识点内容生成高质量的练习题。
