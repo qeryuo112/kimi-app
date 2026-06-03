@@ -83,8 +83,11 @@ export const settingsRouter = createRouter({
       const db = getDb();
       const { fileServerUrl, ...userFields } = input;
 
-      // fileServerUrl 更新到全局配置
+      // fileServerUrl 仅管理员可修改
       if (fileServerUrl !== undefined) {
+        if (ctx.user.role !== "admin") {
+          throw new Error("仅管理员可修改文件上传服务器地址");
+        }
         await setGlobalFileServerUrl(fileServerUrl);
       }
 
