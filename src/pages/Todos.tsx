@@ -209,6 +209,17 @@ export default function Todos() {
     onError: (err) => toast.error(err.message),
   });
 
+  // 删除复习安排
+  const deleteReview = trpc.todo.deleteReview.useMutation({
+    onSuccess: () => {
+      utils.todo.getReviews.invalidate();
+      utils.knowledge.list.invalidate();
+      utils.skill.list.invalidate();
+      toast.success("复习安排已删除");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const skipTodo = trpc.todo.skip.useMutation({
     onSuccess: () => utils.todo.getToday.invalidate(),
   });
@@ -563,6 +574,20 @@ export default function Todos() {
                           </Button>
                         </>
                       )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                        onClick={() => {
+                          if (confirm("确定删除这条复习安排吗？")) {
+                            deleteReview.mutate({ reviewId: rev.id });
+                          }
+                        }}
+                        disabled={deleteReview.isPending}
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        删除
+                      </Button>
                       <Button
                         size="sm"
                         onClick={() => {

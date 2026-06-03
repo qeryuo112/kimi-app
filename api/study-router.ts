@@ -258,19 +258,23 @@ export const studyRouter = createRouter({
             .where(eq(subjects.id, sub.id));
         }
 
-        // 4. 恢复复习调度
-        for (const rev of snapshot.reviewSchedules || []) {
+        // 4. 删除与该学习记录关联的复习安排
+        const logNodeTitle = log.nodeId
+          ? (await db.select().from(knowledgeNodes).where(eq(knowledgeNodes.id, log.nodeId)).then(([n]) => n?.title))
+          : null;
+        const logSubjectTitle = log.subjectId
+          ? (await db.select().from(subjects).where(eq(subjects.id, log.subjectId)).then(([s]) => s?.title))
+          : null;
+        if (logNodeTitle && logSubjectTitle) {
           await db
-            .update(reviewSchedules)
-            .set({
-              reviewCount: rev.reviewCount,
-              intervalDays: rev.intervalDays,
-              nextReviewDate: rev.nextReviewDate,
-              mastery: rev.mastery,
-              reviewDates: rev.reviewDates,
-              status: rev.status,
-            })
-            .where(eq(reviewSchedules.id, rev.id));
+            .delete(reviewSchedules)
+            .where(
+              and(
+                eq(reviewSchedules.userId, ctx.user.id),
+                eq(reviewSchedules.nodeTitle, logNodeTitle),
+                eq(reviewSchedules.subjectTitle, logSubjectTitle)
+              )
+            );
         }
       }
 

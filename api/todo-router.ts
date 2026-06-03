@@ -1672,4 +1672,24 @@ export const todoRouter = createRouter({
 
       return { success: true, message: "复习数据已回退" };
     }),
+
+  // 删除复习安排
+  deleteReview: authedQuery
+    .input(z.object({ reviewId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      const [review] = await db
+        .select()
+        .from(reviewSchedules)
+        .where(and(eq(reviewSchedules.id, input.reviewId), eq(reviewSchedules.userId, ctx.user.id)));
+
+      if (!review) throw new Error("复习任务不存在");
+
+      await db
+        .delete(reviewSchedules)
+        .where(and(eq(reviewSchedules.id, input.reviewId), eq(reviewSchedules.userId, ctx.user.id)));
+
+      return { success: true };
+    }),
 });
