@@ -103,6 +103,7 @@ export const authRouter = createRouter({
     .mutation(async ({ input }) => {
       console.log("[Auth] login mutation called, username=", input.username);
       const db = getDb();
+      console.log("[Auth] login: querying users table");
       const [user] = await db.select().from(users).where(eq(users.unionId, input.username));
       console.log("[Auth] login: user found=", !!user, "hasPassword=", !!user?.passwordHash);
 
@@ -111,6 +112,7 @@ export const authRouter = createRouter({
         throw new Error("用户名或密码错误");
       }
 
+      console.log("[Auth] login: comparing password");
       const valid = await bcrypt.compare(input.password, user.passwordHash);
       console.log("[Auth] login: password valid=", valid);
       if (!valid) {
