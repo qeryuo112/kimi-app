@@ -33,30 +33,43 @@ export default function Login() {
   });
 
   const registerMutation = trpc.auth.register.useMutation({
+    onMutate: (vars) => {
+      console.log("[Login] registerMutation onMutate, vars=", vars);
+    },
     onSuccess: (data) => {
+      console.log("[Login] registerMutation onSuccess, data=", data);
       setCookie("kimiokc_session", data.token, 7);
       toast.success("注册成功");
       window.location.href = "/";
     },
     onError: (err) => {
+      console.error("[Login] registerMutation onError:", err);
       toast.error(err.message || "注册失败");
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("[Login] handleSubmit called, mode=", mode, "username=", username.trim());
     if (!username.trim() || !password.trim()) {
+      console.log("[Login] validation failed: empty username or password");
       toast.error("请填写用户名和密码");
       return;
     }
     if (mode === "register") {
+      console.log("[Login] register mode, password=", password.length, "confirm=", confirmPassword.length);
       if (password !== confirmPassword) {
+        console.log("[Login] password mismatch");
         toast.error("两次密码不一致");
         return;
       }
+      console.log("[Login] calling registerMutation.mutate");
       registerMutation.mutate({ username: username.trim(), password });
+      console.log("[Login] registerMutation.mutate returned");
     } else {
+      console.log("[Login] calling loginMutation.mutate");
       loginMutation.mutate({ username: username.trim(), password });
+      console.log("[Login] loginMutation.mutate returned");
     }
   };
 
