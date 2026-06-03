@@ -189,9 +189,10 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
                 <label className="text-sm font-medium flex items-center gap-2">
                   文件上传服务器地址
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-semibold">全局</span>
                 </label>
                 <Input
                   placeholder="http://你的VPS_IP:3001（用于文档识别上传）"
@@ -199,7 +200,7 @@ export default function SettingsPage() {
                   onChange={(e) => setForm({ ...form, fileServerUrl: e.target.value })}
                 />
                 <p className="text-xs text-muted-foreground">
-                  配置后，文档识别功能会将文件上传到此服务器并获取公网URL供AI读取。未配置时可在识别面板手动粘贴URL。
+                  全账号通用配置。配置后，所有用户的文档识别功能都会将文件上传到此服务器。未配置时可在识别面板手动粘贴URL。
                 </p>
               </div>
             </CardContent>

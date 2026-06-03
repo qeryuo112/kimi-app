@@ -1,38 +1,69 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { userSettings } from "@db/schema";
+import { userSettings, appSettings } from "@db/schema";
 import { eq } from "drizzle-orm";
 
+const GLOBAL_FILE_SERVER_KEY = "fileServerUrl";
+
+async function getGlobalFileServerUrl(): Promise<string> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, GLOBAL_FILE_SERVER_KEY));
+  return row?.value || "";
+}
+
+async function setGlobalFileServerUrl(url: string) {
+  const db = getDb();
+  const existing = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, GLOBAL_FILE_SERVER_KEY));
+
+  if (existing.length === 0) {
+    await db.insert(appSettings).values({ key: GLOBAL_FILE_SERVER_KEY, value: url });
+  } else {
+    await db
+      .update(appSettings)
+      .set({ value: url })
+      .where(eq(appSettings.key, GLOBAL_FILE_SERVER_KEY));
+  }
+}
+
 export const settingsRouter = createRouter({
-  // 获取用户设置
+  // 获取用户设置（fileServerUrl 为全局值）
   get: authedQuery.query(async ({ ctx }) => {
-    const [settings] = await getDb()
+    const db = getDb();
+    const [settings] = await db
       .select()
       .from(userSettings)
       .where(eq(userSettings.userId, ctx.user.id));
 
+    const globalFileServerUrl = await getGlobalFileServerUrl();
+
     if (!settings) {
       // 创建默认设置
-      const [{ id }] = await getDb()
+      const [{ id }] = await db
         .insert(userSettings)
         .values({
           userId: ctx.user.id,
         })
         .$returningId();
 
-      const [newSettings] = await getDb()
+      const [newSettings] = await db
         .select()
         .from(userSettings)
         .where(eq(userSettings.id, id));
 
-      return newSettings;
+      return { ...newSettings, fileServerUrl: globalFileServerUrl };
     }
 
-    return settings;
+    return { ...settings, fileServerUrl: globalFileServerUrl };
   }),
 
-  // 更新用户设置
+  // 更新用户设置（fileServerUrl 存到全局配置表）
   update: authedQuery
     .input(
       z.object({
@@ -49,29 +80,35 @@ export const settingsRouter = createRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const existing = await getDb()
+      const db = getDb();
+      const { fileServerUrl, ...userFields } = input;
+
+      // fileServerUrl 更新到全局配置
+      if (fileServerUrl !== undefined) {
+        await setGlobalFileServerUrl(fileServerUrl);
+      }
+
+      // 其他字段更新到用户设置
+      const existing = await db
         .select()
         .from(userSettings)
         .where(eq(userSettings.userId, ctx.user.id));
 
       if (existing.length === 0) {
-        await getDb()
-          .insert(userSettings)
-          .values({
-            userId: ctx.user.id,
-            ...input,
-          });
-      } else {
-        await getDb()
+        await db.insert(userSettings).values({ userId: ctx.user.id, ...userFields });
+      } else if (Object.keys(userFields).length > 0) {
+        await db
           .update(userSettings)
-          .set(input)
+          .set(userFields)
           .where(eq(userSettings.userId, ctx.user.id));
       }
 
-      return getDb()
+      const [settings] = await db
         .select()
         .from(userSettings)
-        .where(eq(userSettings.userId, ctx.user.id))
-        .then(([s]) => s);
+        .where(eq(userSettings.userId, ctx.user.id));
+
+      const globalFileServerUrl = await getGlobalFileServerUrl();
+      return { ...settings, fileServerUrl: globalFileServerUrl };
     }),
 });

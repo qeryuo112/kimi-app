@@ -228,6 +228,20 @@ export const userSettings = mysqlTable("user_settings", {
 export type UserSetting = typeof userSettings.$inferSelect;
 export type InsertUserSetting = typeof userSettings.$inferInsert;
 
+// ==================== 全局应用设置表 ====================
+export const appSettings = mysqlTable("app_settings", {
+  id: serial("id").primaryKey(),
+  key: varchar("key", { length: 100 }).notNull().unique(),
+  value: text("value"),
+  updatedAt: timestamp("updatedAt")
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+});
+
+export type AppSetting = typeof appSettings.$inferSelect;
+export type InsertAppSetting = typeof appSettings.$inferInsert;
+
 // ==================== 学习统计表（缓存） ====================
 export const studyStats = mysqlTable("study_stats", {
   id: serial("id").primaryKey(),
