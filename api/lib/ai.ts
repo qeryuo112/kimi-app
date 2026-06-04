@@ -158,7 +158,7 @@ export async function chatWithAI(
     model: modelName || "glm-4.6v",
     messages,
     temperature,
-    max_tokens: 32768,
+    max_tokens: 128000,
   };
   if (requireJson) {
     body.response_format = { type: "json_object" };
