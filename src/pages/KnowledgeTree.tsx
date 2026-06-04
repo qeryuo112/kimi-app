@@ -78,7 +78,7 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery, onEdit
   return (
     <div className="select-none">
       <div
-        className={`flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-secondary/50 transition-colors cursor-pointer group ${
+        className={`flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-secondary/50 transition-colors cursor-pointer group overflow-hidden ${
           node.level === 1 ? "bg-secondary/30" : ""
         }`}
         style={{ paddingLeft: `${node.level * 16 + 8}px` }}
@@ -94,10 +94,10 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery, onEdit
           <div className="w-4" />
         )}
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium truncate">{node.title}</span>
-            <div className="flex gap-1">
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm font-medium truncate flex-1 min-w-0">{node.title}</span>
+            <div className="flex gap-1 flex-shrink-0">
               {tags.slice(0, 2).map((tag: string) => (
                 <Badge key={tag} variant="outline" className="text-[9px] px-1 py-0 h-4">
                   {tag}
@@ -106,7 +106,7 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery, onEdit
             </div>
           </div>
           {node.description && (
-            <p className="text-xs text-muted-foreground truncate">{node.description}</p>
+            <p className="text-xs text-muted-foreground truncate block">{node.description}</p>
           )}
         </div>
 
