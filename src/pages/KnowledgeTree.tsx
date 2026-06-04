@@ -174,7 +174,7 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery, onEdit
             </div>
           </div>
           {node.description && (
-            <p className="text-xs text-muted-foreground whitespace-nowrap inline-block">{node.description}</p>
+            <p className="text-xs text-muted-foreground break-words">{node.description}</p>
           )}
         </div>
       </div>
