@@ -49,6 +49,8 @@ export default function SettingsPage() {
     aiApiEndpoint: "",
     fileServerUrl: "",
     aiMaxTokens: 128000,
+    aiEnableThinking: true,
+    aiTemperature: 0.5,
     dailyGoal: 120,
     weekGoal: 600,
     notifications: true,
@@ -64,6 +66,8 @@ export default function SettingsPage() {
         aiApiEndpoint: settings.aiApiEndpoint || "",
         fileServerUrl: settings.fileServerUrl || "",
         aiMaxTokens: settings.aiMaxTokens || 128000,
+        aiEnableThinking: settings.aiEnableThinking ?? true,
+        aiTemperature: settings.aiTemperature ?? 0.5,
         dailyGoal: settings.dailyGoal || 120,
         weekGoal: settings.weekGoal || 600,
         notifications: settings.notifications ?? true,
@@ -265,6 +269,53 @@ export default function SettingsPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   全账号通用配置。控制 AI 单次输出的最大 token 数，根据模型能力调整（如 glm-4.6v 默认 128000）。
+                </p>
+              </div>
+
+              <div className="space-y-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  AI 思考模式
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-semibold">全局</span>
+                  {!isAdmin && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">仅管理员可编辑</span>
+                  )}
+                </label>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm">启用思考模式</p>
+                    <p className="text-xs text-muted-foreground">
+                      开启后 AI 会先输出思考过程再生成结果。思考过程会占用大量 token，容易导致输出被截断。
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.aiEnableThinking}
+                    onCheckedChange={(checked) => setForm({ ...form, aiEnableThinking: checked })}
+                    disabled={!isAdmin}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  AI 温度
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-semibold">全局</span>
+                  {!isAdmin && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">仅管理员可编辑</span>
+                  )}
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  placeholder="0.5"
+                  value={form.aiTemperature}
+                  onChange={(e) => setForm({ ...form, aiTemperature: Number(e.target.value) })}
+                  disabled={!isAdmin}
+                  className={!isAdmin ? "bg-muted cursor-not-allowed" : ""}
+                />
+                <p className="text-xs text-muted-foreground">
+                  全账号通用配置。温度越低输出越确定严谨（适合知识提取），越高越创造性（适合对话）。推荐范围 0.2~0.7。
                 </p>
               </div>
             </CardContent>

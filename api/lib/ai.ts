@@ -19,6 +19,25 @@ async function getAiMaxTokens(): Promise<number> {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_TOKENS;
 }
 
+async function getAiEnableThinking(): Promise<boolean> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, "aiEnableThinking"));
+  return row?.value === "true";
+}
+
+async function getAiTemperature(): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, "aiTemperature"));
+  const parsed = row?.value ? parseFloat(row.value) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 2 ? parsed : 0.5;
+}
+
 // ========== 调试日志工具 ==========
 const DEBUG_LOG_FILE = path.join(process.cwd(), "ai-debug.log");
 
@@ -150,13 +169,11 @@ interface KimiResponse {
 // 调用AI API进行对话
 export async function chatWithAI(
   messages: KimiMessage[],
-  temperature = 0.7,
   apiKey?: string,
   apiUrl?: string,
   modelName?: string,
   requireJson = false,
-  debugLabel?: string,
-  enableThinking?: boolean
+  debugLabel?: string
 ): Promise<string> {
   const label = debugLabel || "chatWithAI";
   const startTime = Date.now();
@@ -169,7 +186,12 @@ export async function chatWithAI(
     url = url.replace(/\/$/, "") + "/v1/chat/completions";
   }
 
-  const maxTokens = await getAiMaxTokens();
+  const [maxTokens, enableThinking, temperature] = await Promise.all([
+    getAiMaxTokens(),
+    getAiEnableThinking(),
+    getAiTemperature(),
+  ]);
+
   const body: Record<string, unknown> = {
     model: modelName || "glm-4.6v",
     messages,
@@ -337,12 +359,9 @@ ${content.trim().length > title.length + 5 ? `内容：\n${content.slice(0, 8000
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.5,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -462,7 +481,7 @@ export async function analyzeFilesForKnowledgeTree(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true, undefined, true);
+  const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
     const jsonStr = extractJsonFromResponse(result);
@@ -562,12 +581,9 @@ ${content.slice(0, 8000)}
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.5,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -643,7 +659,7 @@ export async function analyzeFilesForSkills(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true, undefined, true);
+  const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
     const parsed = JSON.parse(result);
@@ -1174,7 +1190,7 @@ export async function generateQuestionsFromFileUrls(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.7, apiKey, apiUrl, modelName, true, undefined, true);
+  const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
     const parsed = JSON.parse(result);
@@ -1324,12 +1340,9 @@ export async function evaluateAnswer(
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.5,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -1840,7 +1853,7 @@ export async function generateTodoTestFromFiles(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.6, apiKey, apiUrl, modelName, true, undefined, true);
+  const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
     const parsed = JSON.parse(result);
@@ -1933,7 +1946,7 @@ export async function recognizeQuestionsFromUrls(
     },
   ];
 
-  const result = await chatWithAI(messages, 0.5, apiKey, apiUrl, modelName, true, undefined, true);
+  const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
     const parsed = JSON.parse(result);
@@ -2004,7 +2017,7 @@ ${contextData ? JSON.stringify(contextData, null, 2) : "暂无上下文数据"}
     }
   }
 
-  const result = await chatWithAI(chatMessages, 0.7, apiKey, apiUrl, modelName, false, undefined, true);
+  const result = await chatWithAI(chatMessages, apiKey, apiUrl, modelName, false);
   return result;
 }
 
@@ -2130,12 +2143,9 @@ ${localNodes ? JSON.stringify(localNodes.map(n => ({ id: n.id, title: n.title, s
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.5,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 

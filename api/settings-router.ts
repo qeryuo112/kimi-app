@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 
 const GLOBAL_FILE_SERVER_KEY = "fileServerUrl";
 const AI_MAX_TOKENS_KEY = "aiMaxTokens";
+const AI_ENABLE_THINKING_KEY = "aiEnableThinking";
+const AI_TEMPERATURE_KEY = "aiTemperature";
 
 async function getGlobalSetting(key: string): Promise<string> {
   const db = getDb();
@@ -35,6 +37,16 @@ export const settingsRouter = createRouter({
     const globalFileServerUrl = await getGlobalSetting(GLOBAL_FILE_SERVER_KEY);
     const aiMaxTokensRaw = await getGlobalSetting(AI_MAX_TOKENS_KEY);
     const aiMaxTokens = aiMaxTokensRaw ? parseInt(aiMaxTokensRaw, 10) : 128000;
+    const aiEnableThinking = (await getGlobalSetting(AI_ENABLE_THINKING_KEY)) !== "false";
+    const aiTemperatureRaw = await getGlobalSetting(AI_TEMPERATURE_KEY);
+    const aiTemperature = aiTemperatureRaw ? parseFloat(aiTemperatureRaw) : 0.5;
+
+    const globalSettings = {
+      fileServerUrl: globalFileServerUrl,
+      aiMaxTokens,
+      aiEnableThinking,
+      aiTemperature,
+    };
 
     if (!settings) {
       // 创建默认设置
@@ -50,10 +62,10 @@ export const settingsRouter = createRouter({
         .from(userSettings)
         .where(eq(userSettings.id, id));
 
-      return { ...newSettings, fileServerUrl: globalFileServerUrl, aiMaxTokens };
+      return { ...newSettings, ...globalSettings };
     }
 
-    return { ...settings, fileServerUrl: globalFileServerUrl, aiMaxTokens };
+    return { ...settings, ...globalSettings };
   }),
 
   // 更新用户设置（fileServerUrl 存到全局配置表）
@@ -67,6 +79,8 @@ export const settingsRouter = createRouter({
         aiApiEndpoint: z.string().optional(),
         fileServerUrl: z.string().optional(),
         aiMaxTokens: z.number().min(1).optional(),
+        aiEnableThinking: z.boolean().optional(),
+        aiTemperature: z.number().min(0).max(2).optional(),
         defaultDifficulty: z.number().min(1).max(5).optional(),
         dailyGoal: z.number().optional(),
         weekGoal: z.number().optional(),
@@ -75,7 +89,7 @@ export const settingsRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const { fileServerUrl, aiMaxTokens: inputMaxTokens, ...userFields } = input;
+      const { fileServerUrl, aiMaxTokens: inputMaxTokens, aiEnableThinking: inputEnableThinking, aiTemperature: inputTemperature, ...userFields } = input;
 
       // 全局配置仅管理员可修改
       if (fileServerUrl !== undefined) {
@@ -89,6 +103,18 @@ export const settingsRouter = createRouter({
           throw new Error("仅管理员可修改 AI Max Tokens");
         }
         await setGlobalSetting(AI_MAX_TOKENS_KEY, String(inputMaxTokens));
+      }
+      if (inputEnableThinking !== undefined) {
+        if (ctx.user.role !== "admin") {
+          throw new Error("仅管理员可修改 AI 思考模式");
+        }
+        await setGlobalSetting(AI_ENABLE_THINKING_KEY, String(inputEnableThinking));
+      }
+      if (inputTemperature !== undefined) {
+        if (ctx.user.role !== "admin") {
+          throw new Error("仅管理员可修改 AI 温度");
+        }
+        await setGlobalSetting(AI_TEMPERATURE_KEY, String(inputTemperature));
       }
 
       // 其他字段更新到用户设置
@@ -114,6 +140,9 @@ export const settingsRouter = createRouter({
       const globalFileServerUrl = await getGlobalSetting(GLOBAL_FILE_SERVER_KEY);
       const aiMaxTokensRaw = await getGlobalSetting(AI_MAX_TOKENS_KEY);
       const aiMaxTokens = aiMaxTokensRaw ? parseInt(aiMaxTokensRaw, 10) : 128000;
-      return { ...settings, fileServerUrl: globalFileServerUrl, aiMaxTokens };
+      const aiEnableThinking = (await getGlobalSetting(AI_ENABLE_THINKING_KEY)) !== "false";
+      const aiTemperatureRaw = await getGlobalSetting(AI_TEMPERATURE_KEY);
+      const aiTemperature = aiTemperatureRaw ? parseFloat(aiTemperatureRaw) : 0.5;
+      return { ...settings, fileServerUrl: globalFileServerUrl, aiMaxTokens, aiEnableThinking, aiTemperature };
     }),
 });
