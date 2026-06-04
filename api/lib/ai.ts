@@ -3,6 +3,21 @@ import { env } from "./env";
 import fs from "fs";
 import path from "path";
 import axios from "axios";
+import { getDb } from "../queries/connection";
+import { appSettings } from "@db/schema";
+import { eq } from "drizzle-orm";
+
+const DEFAULT_MAX_TOKENS = 128000;
+
+async function getAiMaxTokens(): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, "aiMaxTokens"));
+  const parsed = row?.value ? parseInt(row.value, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_TOKENS;
+}
 
 // ========== 调试日志工具 ==========
 const DEBUG_LOG_FILE = path.join(process.cwd(), "ai-debug.log");
@@ -154,11 +169,12 @@ export async function chatWithAI(
     url = url.replace(/\/$/, "") + "/v1/chat/completions";
   }
 
+  const maxTokens = await getAiMaxTokens();
   const body: Record<string, unknown> = {
     model: modelName || "glm-4.6v",
     messages,
     temperature,
-    max_tokens: 128000,
+    max_tokens: maxTokens,
   };
   if (requireJson) {
     body.response_format = { type: "json_object" };

@@ -5,35 +5,26 @@ import { userSettings, appSettings } from "@db/schema";
 import { eq } from "drizzle-orm";
 
 const GLOBAL_FILE_SERVER_KEY = "fileServerUrl";
+const AI_MAX_TOKENS_KEY = "aiMaxTokens";
 
-async function getGlobalFileServerUrl(): Promise<string> {
+async function getGlobalSetting(key: string): Promise<string> {
   const db = getDb();
-  const [row] = await db
-    .select()
-    .from(appSettings)
-    .where(eq(appSettings.key, GLOBAL_FILE_SERVER_KEY));
+  const [row] = await db.select().from(appSettings).where(eq(appSettings.key, key));
   return row?.value || "";
 }
 
-async function setGlobalFileServerUrl(url: string) {
+async function setGlobalSetting(key: string, value: string) {
   const db = getDb();
-  const existing = await db
-    .select()
-    .from(appSettings)
-    .where(eq(appSettings.key, GLOBAL_FILE_SERVER_KEY));
-
+  const existing = await db.select().from(appSettings).where(eq(appSettings.key, key));
   if (existing.length === 0) {
-    await db.insert(appSettings).values({ key: GLOBAL_FILE_SERVER_KEY, value: url });
+    await db.insert(appSettings).values({ key, value });
   } else {
-    await db
-      .update(appSettings)
-      .set({ value: url })
-      .where(eq(appSettings.key, GLOBAL_FILE_SERVER_KEY));
+    await db.update(appSettings).set({ value }).where(eq(appSettings.key, key));
   }
 }
 
 export const settingsRouter = createRouter({
-  // 获取用户设置（fileServerUrl 为全局值）
+  // 获取用户设置（fileServerUrl / aiMaxTokens 为全局值）
   get: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
     const [settings] = await db
@@ -41,7 +32,9 @@ export const settingsRouter = createRouter({
       .from(userSettings)
       .where(eq(userSettings.userId, ctx.user.id));
 
-    const globalFileServerUrl = await getGlobalFileServerUrl();
+    const globalFileServerUrl = await getGlobalSetting(GLOBAL_FILE_SERVER_KEY);
+    const aiMaxTokensRaw = await getGlobalSetting(AI_MAX_TOKENS_KEY);
+    const aiMaxTokens = aiMaxTokensRaw ? parseInt(aiMaxTokensRaw, 10) : 128000;
 
     if (!settings) {
       // 创建默认设置
@@ -57,10 +50,10 @@ export const settingsRouter = createRouter({
         .from(userSettings)
         .where(eq(userSettings.id, id));
 
-      return { ...newSettings, fileServerUrl: globalFileServerUrl };
+      return { ...newSettings, fileServerUrl: globalFileServerUrl, aiMaxTokens };
     }
 
-    return { ...settings, fileServerUrl: globalFileServerUrl };
+    return { ...settings, fileServerUrl: globalFileServerUrl, aiMaxTokens };
   }),
 
   // 更新用户设置（fileServerUrl 存到全局配置表）
@@ -73,6 +66,7 @@ export const settingsRouter = createRouter({
         aiApiKey: z.string().optional(),
         aiApiEndpoint: z.string().optional(),
         fileServerUrl: z.string().optional(),
+        aiMaxTokens: z.number().min(1).optional(),
         defaultDifficulty: z.number().min(1).max(5).optional(),
         dailyGoal: z.number().optional(),
         weekGoal: z.number().optional(),
@@ -81,14 +75,20 @@ export const settingsRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const { fileServerUrl, ...userFields } = input;
+      const { fileServerUrl, aiMaxTokens: inputMaxTokens, ...userFields } = input;
 
-      // fileServerUrl 仅管理员可修改
+      // 全局配置仅管理员可修改
       if (fileServerUrl !== undefined) {
         if (ctx.user.role !== "admin") {
           throw new Error("仅管理员可修改文件上传服务器地址");
         }
-        await setGlobalFileServerUrl(fileServerUrl);
+        await setGlobalSetting(GLOBAL_FILE_SERVER_KEY, fileServerUrl);
+      }
+      if (inputMaxTokens !== undefined) {
+        if (ctx.user.role !== "admin") {
+          throw new Error("仅管理员可修改 AI Max Tokens");
+        }
+        await setGlobalSetting(AI_MAX_TOKENS_KEY, String(inputMaxTokens));
       }
 
       // 其他字段更新到用户设置
@@ -111,7 +111,9 @@ export const settingsRouter = createRouter({
         .from(userSettings)
         .where(eq(userSettings.userId, ctx.user.id));
 
-      const globalFileServerUrl = await getGlobalFileServerUrl();
-      return { ...settings, fileServerUrl: globalFileServerUrl };
+      const globalFileServerUrl = await getGlobalSetting(GLOBAL_FILE_SERVER_KEY);
+      const aiMaxTokensRaw = await getGlobalSetting(AI_MAX_TOKENS_KEY);
+      const aiMaxTokens = aiMaxTokensRaw ? parseInt(aiMaxTokensRaw, 10) : 128000;
+      return { ...settings, fileServerUrl: globalFileServerUrl, aiMaxTokens };
     }),
 });

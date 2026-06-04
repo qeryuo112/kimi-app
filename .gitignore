@@ -40,3 +40,18 @@ build/
 # Test coverage
 coverage/
 .nyc_output/
+
+# Deployment artifacts
+deploy*.tar.gz
+kimiokc-deploy*.tar.gz
+
+# Local docs and scripts
+WORKSPACE_SUMMARY.md
+DEPLOY_LOG.md
+LLAMA_CPP_SETUP.md
+LM_STUDIO_GUIDE.md
+OLLAMA_DEPLOY.md
+Modelfile-*
+*.bat
+test-model.mjs
+upload-server/package-lock.json

@@ -48,6 +48,7 @@ export default function SettingsPage() {
     aiApiKey: "",
     aiApiEndpoint: "",
     fileServerUrl: "",
+    aiMaxTokens: 128000,
     dailyGoal: 120,
     weekGoal: 600,
     notifications: true,
@@ -62,6 +63,7 @@ export default function SettingsPage() {
         aiApiKey: settings.aiApiKey || "",
         aiApiEndpoint: settings.aiApiEndpoint || "",
         fileServerUrl: settings.fileServerUrl || "",
+        aiMaxTokens: settings.aiMaxTokens || 128000,
         dailyGoal: settings.dailyGoal || 120,
         weekGoal: settings.weekGoal || 600,
         notifications: settings.notifications ?? true,
@@ -241,6 +243,28 @@ export default function SettingsPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   全账号通用配置。配置后，所有用户的文档识别功能都会将文件上传到此服务器。未配置时可在识别面板手动粘贴URL。
+                </p>
+              </div>
+
+              <div className="space-y-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  AI Max Tokens
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-semibold">全局</span>
+                  {!isAdmin && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">仅管理员可编辑</span>
+                  )}
+                </label>
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="128000"
+                  value={form.aiMaxTokens}
+                  onChange={(e) => setForm({ ...form, aiMaxTokens: Number(e.target.value) })}
+                  disabled={!isAdmin}
+                  className={!isAdmin ? "bg-muted cursor-not-allowed" : ""}
+                />
+                <p className="text-xs text-muted-foreground">
+                  全账号通用配置。控制 AI 单次输出的最大 token 数，根据模型能力调整（如 glm-4.6v 默认 128000）。
                 </p>
               </div>
             </CardContent>
