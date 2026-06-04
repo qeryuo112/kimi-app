@@ -502,7 +502,7 @@ export const planRouter = createRouter({
           ]);
 
           // 3. 保存知识节点
-          const titleToIdMap = new Map<string, number>();
+          const fullPathToIdMap = new Map<string, number>();
           for (const node of knowledgeResult.nodes) {
             const [{ id: nodeId }] = await db
               .insert(knowledgeNodes)
@@ -517,26 +517,26 @@ export const planRouter = createRouter({
                 difficulty: node.difficulty,
                 estimatedMinutes: node.estimatedMinutes,
                 tags: JSON.stringify(node.tags || []),
-                isLeaf: !knowledgeResult.nodes.some((n) => n.parentTitle === node.title),
+                isLeaf: !knowledgeResult.nodes.some((n) => n.parentTitle === node.fullPath),
               })
               .$returningId();
-            titleToIdMap.set(node.title, nodeId);
+            fullPathToIdMap.set(node.fullPath, nodeId);
           }
 
           // 更新父节点关系
           for (const node of knowledgeResult.nodes) {
-            if (node.parentTitle && titleToIdMap.has(node.parentTitle)) {
+            if (node.parentTitle && fullPathToIdMap.has(node.parentTitle)) {
               await db
                 .update(knowledgeNodes)
-                .set({ parentId: titleToIdMap.get(node.parentTitle) })
-                .where(eq(knowledgeNodes.id, titleToIdMap.get(node.title)!));
+                .set({ parentId: fullPathToIdMap.get(node.parentTitle) })
+                .where(eq(knowledgeNodes.id, fullPathToIdMap.get(node.fullPath)!));
             }
           }
 
           // 保存知识边
           for (const edge of knowledgeResult.edges) {
-            const sourceId = titleToIdMap.get(edge.sourceTitle);
-            const targetId = titleToIdMap.get(edge.targetTitle);
+            const sourceId = fullPathToIdMap.get(edge.sourceTitle);
+            const targetId = fullPathToIdMap.get(edge.targetTitle);
             if (sourceId && targetId) {
               await db.insert(knowledgeEdges).values({
                 userId: ctx.user.id,

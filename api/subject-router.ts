@@ -277,12 +277,13 @@ export const subjectRouter = createRouter({
 
         // 6. 保存知识节点到数据库
         debugLog("步骤6: 保存知识节点", { expectedCount: knowledgeResult.nodes?.length || 0 });
-        const titleToIdMap = new Map<string, number>();
+        const fullPathToIdMap = new Map<string, number>();
 
         for (let i = 0; i < knowledgeResult.nodes.length; i++) {
           const node = knowledgeResult.nodes[i];
           debugLog(`步骤6[${i + 1}/${knowledgeResult.nodes.length}]: 插入节点`, {
             title: node.title,
+            fullPath: node.fullPath,
             level: node.level,
             orderIndex: node.orderIndex,
             parentTitle: node.parentTitle,
@@ -303,7 +304,7 @@ export const subjectRouter = createRouter({
                 difficulty: node.difficulty,
                 estimatedMinutes: node.estimatedMinutes,
                 tags: JSON.stringify(node.tags || []),
-                isLeaf: !knowledgeResult.nodes.some((n) => n.parentTitle === node.title),
+                isLeaf: !knowledgeResult.nodes.some((n) => n.parentTitle === node.fullPath),
               })
               .$returningId();
 
@@ -316,25 +317,27 @@ export const subjectRouter = createRouter({
 
             const nodeId = insertResult[0].id;
             debugLog(`步骤6[${i + 1}] 节点ID`, { nodeId, type: typeof nodeId });
-            titleToIdMap.set(node.title, Number(nodeId));
+            fullPathToIdMap.set(node.fullPath, Number(nodeId));
           } catch (insertErr) {
             debugLogError(`步骤6[${i + 1}] 节点插入失败`, insertErr);
             throw insertErr;
           }
         }
-        debugLog("步骤6完成", { savedNodes: titleToIdMap.size });
+        debugLog("步骤6完成", { savedNodes: fullPathToIdMap.size });
 
         // 7. 更新父节点关系
         debugLog("步骤7: 更新父节点关系", { nodesWithParent: knowledgeResult.nodes.filter((n) => n.parentTitle).length });
         for (const node of knowledgeResult.nodes) {
-          if (node.parentTitle && titleToIdMap.has(node.parentTitle)) {
-            const nodeId = titleToIdMap.get(node.title);
-            const parentId = titleToIdMap.get(node.parentTitle);
-            debugLog("步骤7: 更新parentId", { nodeTitle: node.title, nodeId, parentTitle: node.parentTitle, parentId });
+          if (node.parentTitle && fullPathToIdMap.has(node.parentTitle)) {
+            const nodeId = fullPathToIdMap.get(node.fullPath);
+            const parentId = fullPathToIdMap.get(node.parentTitle);
+            debugLog("步骤7: 更新parentId", { nodeTitle: node.title, nodeFullPath: node.fullPath, nodeId, parentTitle: node.parentTitle, parentId });
             await db
               .update(knowledgeNodes)
               .set({ parentId: parentId })
               .where(eq(knowledgeNodes.id, nodeId!));
+          } else if (node.parentTitle) {
+            debugLog(`步骤7: 父节点未找到`, { nodeTitle: node.title, parentTitle: node.parentTitle });
           }
         }
         debugLog("步骤7完成");
@@ -344,8 +347,8 @@ export const subjectRouter = createRouter({
         let savedEdges = 0;
         for (let i = 0; i < knowledgeResult.edges.length; i++) {
           const edge = knowledgeResult.edges[i];
-          const sourceId = titleToIdMap.get(edge.sourceTitle);
-          const targetId = titleToIdMap.get(edge.targetTitle);
+          const sourceId = fullPathToIdMap.get(edge.sourceTitle);
+          const targetId = fullPathToIdMap.get(edge.targetTitle);
           debugLog(`步骤8[${i + 1}]`, { sourceTitle: edge.sourceTitle, sourceId, targetTitle: edge.targetTitle, targetId, relationType: edge.relationType });
           if (sourceId && targetId) {
             await db.insert(knowledgeEdges).values({

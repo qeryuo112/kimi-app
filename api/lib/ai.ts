@@ -259,6 +259,7 @@ export async function analyzeContentForKnowledgeTree(
 ): Promise<{
   nodes: Array<{
     title: string;
+    fullPath: string; // 完整路径，全局唯一标识，用于建立父子关系
     description: string;
     level: number;
     orderIndex: number;
@@ -266,29 +267,35 @@ export async function analyzeContentForKnowledgeTree(
     difficulty: number;
     estimatedMinutes: number;
     tags: string[];
-    parentTitle?: string;
+    parentTitle?: string; // 引用父节点的 fullPath
   }>;
   edges: Array<{
-    sourceTitle: string;
-    targetTitle: string;
+    sourceTitle: string; // 引用节点的 fullPath
+    targetTitle: string; // 引用节点的 fullPath
     relationType: string;
     strength: number;
   }>;
   subjectDifficulty: number; // 科目整体难度 1-5
   subjectPriority: number; // 科目优先级 1-5
 }> {
-  const systemPrompt = `你是一个专业的教育内容分析AI。请分析用户提供的科目，提取知识结构并生成知识树。
+  const systemPrompt = `你是一个专业的教育内容分析AI。请分析用户提供的科目，严格按照文档的目录结构提取知识树。
 
-要求：
-1. 识别主要章节和关键知识点（如果用户内容不够详细，请基于你对该学科的了解补充完整知识树）
-2. 建立知识点之间的层次关系（父子关系）
-3. 识别知识点之间的关联（前置知识、相关、扩展、组成）
-4. 为每个知识点评估重要性(1-5)和难度(1-5)
-5. 估算每个知识点的学习时间(分钟)
-6. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
-   - 难度：根据内容深度、抽象程度、前置知识要求
-   - 优先级：根据该科目在学科体系中的基础性和重要性
-7. 确保生成至少8-15个知识节点，覆盖该科目的核心内容
+【核心要求 - 必须严格遵守】
+1. **每个节点必须有唯一的 fullPath**。fullPath 是从根到当前节点的完整路径，格式："章标题 / 节标题 / 小节标题"
+2. **严格按照原文档的目录层级生成节点**，确保每个章节、每个小节都成为一个节点，绝不遗漏任何内容
+3. title 保持简洁（如"概述"），fullPath 包含完整路径用于唯一标识（如"第一章 绪论 / 第一节 概述"）
+4. parentTitle 必须引用父节点的 fullPath（根节点省略此字段）
+5. edges 中的 sourceTitle 和 targetTitle 也必须引用 fullPath
+6. description 控制在30字以内，节省输出空间
+7. edges 最多生成10条最核心的关联（前置知识优先），不要生成过多边
+8. 优先保证 nodes 的完整性和正确性，edges 可以精简
+9. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
+
+【fullPath 示例】
+- 根级："第一篇 工业药剂学的基础知识"
+- 章级："第一篇 工业药剂学的基础知识 / 第一章 绪论"
+- 节级："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述"
+- 小节："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述"
 
 请严格按照JSON格式返回，不要包含任何其他文本。格式如下：
 {
@@ -296,21 +303,22 @@ export async function analyzeContentForKnowledgeTree(
   "subjectPriority": 4,
   "nodes": [
     {
-      "title": "知识节点标题",
-      "description": "详细描述",
-      "level": 1,
+      "title": "概述",
+      "fullPath": "第一章 绪论 / 第一节 概述",
+      "description": "阐述工业药剂学定义、常用术语等",
+      "level": 3,
       "orderIndex": 0,
       "importance": 4,
       "difficulty": 3,
       "estimatedMinutes": 45,
       "tags": ["tag1", "tag2"],
-      "parentTitle": "父节点标题（根节点省略）"
+      "parentTitle": "第一章 绪论"
     }
   ],
   "edges": [
     {
-      "sourceTitle": "源节点标题",
-      "targetTitle": "目标节点标题",
+      "sourceTitle": "第一章 绪论 / 第一节 概述",
+      "targetTitle": "第一章 绪论 / 第二节 国家药品标准",
       "relationType": "prerequisite|related|extends|partOf",
       "strength": 3
     }
@@ -368,6 +376,7 @@ export async function analyzeFilesForKnowledgeTree(
 ): Promise<{
   nodes: Array<{
     title: string;
+    fullPath: string; // 完整路径，全局唯一标识
     description: string;
     level: number;
     orderIndex: number;
@@ -375,29 +384,35 @@ export async function analyzeFilesForKnowledgeTree(
     difficulty: number;
     estimatedMinutes: number;
     tags: string[];
-    parentTitle?: string;
+    parentTitle?: string; // 引用父节点的 fullPath
   }>;
   edges: Array<{
-    sourceTitle: string;
-    targetTitle: string;
+    sourceTitle: string; // 引用节点的 fullPath
+    targetTitle: string; // 引用节点的 fullPath
     relationType: string;
     strength: number;
   }>;
   subjectDifficulty: number;
   subjectPriority: number;
 }> {
-  const systemPrompt = `你是一个专业的教育内容分析AI。请仔细阅读用户提供的文件（教材、课件、参考资料等），提取知识结构并生成知识树。
+  const systemPrompt = `你是一个专业的教育内容分析AI。请仔细阅读用户提供的文件（教材、课件、参考资料等），严格按照文档的目录结构提取知识树。
 
-要求：
-1. 从文件中识别主要章节和关键知识点
-2. 建立知识点之间的层次关系（父子关系）
-3. 识别知识点之间的关联（前置知识、相关、扩展、组成）
-4. 为每个知识点评估重要性(1-5)和难度(1-5)
-5. 估算每个知识点的学习时间(分钟)
-6. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
-   - 难度：根据内容深度、抽象程度、前置知识要求
-   - 优先级：根据该科目在学科体系中的基础性和重要性
-7. 确保生成至少8-15个知识节点，覆盖该科目的核心内容
+【核心要求 - 必须严格遵守】
+1. **每个节点必须有唯一的 fullPath**。fullPath 是从根到当前节点的完整路径，格式："章标题 / 节标题 / 小节标题"
+2. **严格按照原文档的目录层级生成节点**，确保每个章节、每个小节都成为一个节点，绝不遗漏任何内容
+3. title 保持简洁（如"概述"），fullPath 包含完整路径用于唯一标识（如"第一章 绪论 / 第一节 概述"）
+4. parentTitle 必须引用父节点的 fullPath（根节点省略此字段）
+5. edges 中的 sourceTitle 和 targetTitle 也必须引用 fullPath
+6. description 控制在30字以内，节省输出空间
+7. edges 最多生成10条最核心的关联（前置知识优先），不要生成过多边
+8. 优先保证 nodes 的完整性和正确性，edges 可以精简
+9. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
+
+【fullPath 示例】
+- 根级："第一篇 工业药剂学的基础知识"
+- 章级："第一篇 工业药剂学的基础知识 / 第一章 绪论"
+- 节级："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述"
+- 小节："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述"
 
 请严格按照JSON格式返回，不要包含任何其他文本。格式如下：
 {
@@ -405,21 +420,22 @@ export async function analyzeFilesForKnowledgeTree(
   "subjectPriority": 4,
   "nodes": [
     {
-      "title": "知识节点标题",
-      "description": "详细描述",
-      "level": 1,
+      "title": "概述",
+      "fullPath": "第一章 绪论 / 第一节 概述",
+      "description": "阐述工业药剂学定义、常用术语等",
+      "level": 3,
       "orderIndex": 0,
       "importance": 4,
       "difficulty": 3,
       "estimatedMinutes": 45,
       "tags": ["tag1", "tag2"],
-      "parentTitle": "父节点标题（根节点省略）"
+      "parentTitle": "第一章 绪论"
     }
   ],
   "edges": [
     {
-      "sourceTitle": "源节点标题",
-      "targetTitle": "目标节点标题",
+      "sourceTitle": "第一章 绪论 / 第一节 概述",
+      "targetTitle": "第一章 绪论 / 第二节 国家药品标准",
       "relationType": "prerequisite|related|extends|partOf",
       "strength": 3
     }
