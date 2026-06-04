@@ -2368,13 +2368,11 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
   const result = await chatWithAI(
     messages,
-    0.6,
     apiKey,
     apiUrl,
     modelName,
     true,
-    "generateRoundAndMonthlyPlanFromFile",
-    true
+    "generateRoundAndMonthlyPlanFromFile"
   );
 
   debugLog("generateRoundAndMonthlyPlanFromFile 收到AI响应", {
