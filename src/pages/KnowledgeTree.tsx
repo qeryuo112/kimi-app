@@ -78,107 +78,104 @@ function TreeNodeItem({ node, expandedNodes, toggleNode, onUpdateMastery, onEdit
   return (
     <div className="select-none">
       <div
-        className={`flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-secondary/50 transition-colors cursor-pointer group overflow-hidden ${
+        className={`flex items-start gap-2 py-2 px-2 rounded-lg hover:bg-secondary/50 transition-colors cursor-pointer ${
           node.level === 1 ? "bg-secondary/30" : ""
         }`}
         style={{ paddingLeft: `${node.level * 16 + 8}px` }}
         onClick={() => hasChildren && toggleNode(node.id)}
       >
-        {hasChildren ? (
-          isExpanded ? (
-            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        <div className="pt-0.5 flex-shrink-0">
+          {hasChildren ? (
+            isExpanded ? (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            )
           ) : (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          )
-        ) : (
-          <div className="w-4" />
-        )}
-
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-medium truncate flex-1 min-w-0">{node.title}</span>
-            <div className="flex gap-1 flex-shrink-0">
-              {tags.slice(0, 2).map((tag: string) => (
-                <Badge key={tag} variant="outline" className="text-[9px] px-1 py-0 h-4">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          </div>
-          {node.description && (
-            <p className="text-xs text-muted-foreground truncate block">{node.description}</p>
+            <div className="w-4" />
           )}
         </div>
 
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <div className="flex items-center gap-1">
-            <Star className="h-3 w-3 text-muted-foreground" />
-            <span className="text-[10px] text-muted-foreground">{node.importance}</span>
-          </div>
-          <div className="w-20 group-hover:hidden">
-            <div className="flex items-center justify-between text-[10px] mb-0.5">
-              <span className="text-muted-foreground">掌握度</span>
-              <span className={node.mastery >= 80 ? "text-green-400" : node.mastery >= 50 ? "text-yellow-400" : "text-red-400"}>
-                {node.mastery}%
-              </span>
+        <div className="flex-1 min-w-0 overflow-x-auto">
+          <div className="flex items-center gap-3 min-w-max">
+            <span className="text-sm font-medium whitespace-nowrap">{node.title}</span>
+            {tags.slice(0, 2).map((tag: string) => (
+              <Badge key={tag} variant="outline" className="text-[9px] px-1 py-0 h-4 whitespace-nowrap">
+                {tag}
+              </Badge>
+            ))}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <Star className="h-3 w-3 text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground">{node.importance}</span>
             </div>
-            <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-              <div
-                className={`h-full rounded-full ${masteryColor} transition-all`}
-                style={{ width: `${node.mastery}%` }}
-              />
+            <div className="w-24 flex-shrink-0">
+              <div className="flex items-center justify-between text-[10px] mb-0.5">
+                <span className="text-muted-foreground">掌握度</span>
+                <span className={node.mastery >= 80 ? "text-green-400" : node.mastery >= 50 ? "text-yellow-400" : "text-red-400"}>
+                  {node.mastery}%
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${masteryColor} transition-all`}
+                  style={{ width: `${node.mastery}%` }}
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                title="编辑"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(node);
+                }}
+              >
+                <Pen className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                title="添加子节点"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddChild(node.id, node.level);
+                }}
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-destructive hover:text-destructive"
+                title="删除"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(node);
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px]"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const newMastery = Math.min(100, node.mastery + 10);
+                  onUpdateMastery(node.id, newMastery);
+                }}
+              >
+                +10%
+              </Button>
             </div>
           </div>
-          <div className="hidden items-center gap-0.5 group-hover:flex">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              title="编辑"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit(node);
-              }}
-            >
-              <Pen className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              title="添加子节点"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddChild(node.id, node.level);
-              }}
-            >
-              <Plus className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-destructive hover:text-destructive"
-              title="删除"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(node);
-              }}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 text-[10px]"
-              onClick={(e) => {
-                e.stopPropagation();
-                const newMastery = Math.min(100, node.mastery + 10);
-                onUpdateMastery(node.id, newMastery);
-              }}
-            >
-              +10%
-            </Button>
-          </div>
+          {node.description && (
+            <p className="text-xs text-muted-foreground truncate">{node.description}</p>
+          )}
         </div>
       </div>
 
