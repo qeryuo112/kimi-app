@@ -716,12 +716,9 @@ export async function searchAndAnalyzeSubjects(
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.6,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -816,13 +813,11 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.6,
     apiKey,
     apiUrl,
     modelName,
     true,
-    "generateRoundAndMonthlyPlan",
-    true
+    "generateRoundAndMonthlyPlan"
   );
 
   try {
@@ -907,13 +902,11 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.6,
     apiKey,
     apiUrl,
     modelName,
     true,
-    "generateWeeklyPlan",
-    true
+    "generateWeeklyPlan"
   );
 
   try {
@@ -1080,13 +1073,11 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.6,
     apiKey,
     apiUrl,
     modelName,
     true,
-    `generateDailyPlanBatch-${startDay}-${endDay}`,
-    true
+    `generateDailyPlanBatch-${startDay}-${endDay}`
   );
 
   try {
@@ -1283,12 +1274,9 @@ ${knowledgeContent.slice(0, 6000)}
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.7,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -1408,12 +1396,9 @@ ${content || "无详细内容"}
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.6,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -1488,12 +1473,9 @@ ${content.slice(0, 8000)}
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.6,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -1563,12 +1545,9 @@ ${nodesInfo}
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.6,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -1654,12 +1633,9 @@ ${knowledgeNodes.map((n, i) => `${i + 1}. ${n}`).join("\n")}
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.6,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -1724,12 +1700,9 @@ ${qaPairs}`;
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    0.4,
     apiKey,
     apiUrl,
     modelName,
-    true,
-    undefined,
     true
   );
 
@@ -2264,13 +2237,11 @@ ${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
 
   const result = await chatWithAI(
     messages,
-    0.6,
     apiKey,
     apiUrl,
     modelName,
     true,
-    "generateCompleteStudyPlanFromFile",
-    true
+    "generateCompleteStudyPlanFromFile"
   );
 
   try {
@@ -2924,13 +2895,11 @@ export async function generateWeeklyReviewQuestions(
 
   const result = await chatWithAI(
     messages,
-    0.7,
     apiKey,
     apiUrl,
     modelName,
     true,
-    `generateWeeklyReview-week${weekData.weekNumber}`,
-    true
+    `generateWeeklyReview-week${weekData.weekNumber}`
   );
 
   try {
@@ -3022,13 +2991,11 @@ ${answers.map((a, i) => `第${i + 1}题(${a.knowledgeNode})：用户答案"${a.u
 
   const result = await chatWithAI(
     messages,
-    0.7,
     apiKey,
     apiUrl,
     modelName,
     true,
-    `evaluateWeeklyReview-week${weekData.weekNumber}`,
-    true
+    `evaluateWeeklyReview-week${weekData.weekNumber}`
   );
 
   try {

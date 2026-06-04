@@ -489,13 +489,11 @@ export const questionRouter = createRouter({
               { role: "system", content: systemPrompt },
               { role: "user", content: contentBlocks },
             ],
-            0.3,
             setting?.aiApiKey || undefined,
             setting?.aiApiEndpoint || undefined,
             setting?.aiModel || undefined,
             true,
-            "question.update.regenerate",
-            true
+            "question.update.regenerate"
           );
           console.log("[question.update] chatWithAI 返回", { resultLength: aiResult.length, first200: aiResult.slice(0, 200) });
 
