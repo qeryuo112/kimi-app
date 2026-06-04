@@ -166,6 +166,120 @@ interface KimiResponse {
   }>;
 }
 
+// ========== Kimi 文件适配 ==========
+
+/** 检测目标平台是否为 Kimi（Moonshot） */
+function isKimiPlatform(_apiUrl?: string, modelName?: string): boolean {
+  const model = (modelName || "").toLowerCase();
+  return model.startsWith("kimi");
+}
+
+/** 从 API URL 提取 base URL（用于文件上传接口） */
+function getBaseUrlFromApiUrl(apiUrl: string): string {
+  return apiUrl.replace(/\/chat\/completions$/, "").replace(/\/$/, "");
+}
+
+/** 下载文件到 Buffer */
+async function downloadFileToBuffer(url: string): Promise<Buffer> {
+  const response = await axios.get(url, {
+    responseType: "arraybuffer",
+    timeout: 30000,
+    maxContentLength: 50 * 1024 * 1024, // 50MB 上限
+  });
+  return Buffer.from(response.data);
+}
+
+/** 通过 Kimi /v1/files 接口上传文件并提取内容 */
+async function extractFileContentWithKimi(
+  fileBuffer: Buffer,
+  fileName: string,
+  apiKey: string,
+  baseUrl: string
+): Promise<string> {
+  // 1. 上传文件到 Kimi
+  const formData = new FormData();
+  formData.append("file", new Blob([fileBuffer]), fileName);
+  formData.append("purpose", "file-extract");
+
+  const uploadRes = await fetch(`${baseUrl}/files`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text().catch(() => "unknown");
+    throw new Error(`Kimi 文件上传失败: ${uploadRes.status} - ${errText}`);
+  }
+
+  const uploadData = await uploadRes.json();
+  const fileId = uploadData.id;
+  if (!fileId) {
+    throw new Error("Kimi 文件上传响应缺少 id");
+  }
+
+  // 2. 获取文件内容
+  const contentRes = await fetch(`${baseUrl}/files/${fileId}/content`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+
+  if (!contentRes.ok) {
+    const errText = await contentRes.text().catch(() => "unknown");
+    throw new Error(`Kimi 文件内容获取失败: ${contentRes.status} - ${errText}`);
+  }
+
+  return await contentRes.text();
+}
+
+/** 预处理消息：将 file_url 转为文本内容（仅对 Kimi 平台） */
+async function preprocessMessagesForKimi(
+  messages: KimiMessage[],
+  apiKey: string,
+  apiUrl: string,
+  label: string
+): Promise<KimiMessage[]> {
+  const baseUrl = getBaseUrlFromApiUrl(apiUrl);
+  debugLog(`${label} preprocessMessagesForKimi开始`, { messageCount: messages.length, baseUrl });
+
+  const result: KimiMessage[] = [];
+  for (let mi = 0; mi < messages.length; mi++) {
+    const msg = messages[mi];
+    if (typeof msg.content === "string") {
+      debugLog(`${label} 消息${mi}是字符串，跳过`, { role: msg.role, length: msg.content.length });
+      result.push(msg);
+      continue;
+    }
+
+    debugLog(`${label} 消息${mi}是数组`, { role: msg.role, blockCount: msg.content.length });
+    const newContent: KimiContent[] = [];
+    for (let bi = 0; bi < msg.content.length; bi++) {
+      const block = msg.content[bi];
+      debugLog(`${label} 消息${mi}块${bi}类型`, { type: block.type });
+      if (block.type === "file_url") {
+        const url = block.file_url.url;
+        try {
+          debugLog(`${label} Kimi文件提取开始`, { url });
+          const buffer = await downloadFileToBuffer(url);
+          debugLog(`${label} 文件下载成功`, { url, size: buffer.length });
+          const fileName = url.split("/").pop()?.split("?")[0] || "file";
+          const text = await extractFileContentWithKimi(buffer, fileName, apiKey, baseUrl);
+          debugLog(`${label} Kimi文件提取成功`, { url, contentLength: text.length });
+          newContent.push({ type: "text", text: `[文件内容]\n${text}\n[/文件内容]` });
+        } catch (err) {
+          debugLogError(`${label} Kimi文件提取失败`, { url, error: err });
+          // 保留原样，让下游请求自然报错，便于排查
+          newContent.push(block);
+        }
+      } else {
+        newContent.push(block);
+      }
+    }
+    result.push({ ...msg, content: newContent });
+  }
+  debugLog(`${label} preprocessMessagesForKimi完成`, { resultCount: result.length });
+  return result;
+}
+
 // 调用AI API进行对话
 export async function chatWithAI(
   messages: KimiMessage[],
@@ -183,7 +297,8 @@ export async function chatWithAI(
 
   // 用户填写的是 base URL，补全路径
   if (url && !url.includes("/chat/completions")) {
-    url = url.replace(/\/$/, "") + "/v1/chat/completions";
+    const clean = url.replace(/\/$/, "");
+    url = clean.endsWith("/v1") ? clean + "/chat/completions" : clean + "/v1/chat/completions";
   }
 
   const [maxTokens, enableThinking, temperature] = await Promise.all([
@@ -192,9 +307,24 @@ export async function chatWithAI(
     getAiTemperature(),
   ]);
 
+  // Kimi 平台适配：将 file_url 内容提取为文本
+  let processedMessages = messages;
+  const isKimi = isKimiPlatform(url, modelName);
+  debugLog(`${label} 平台检测`, { isKimi, url, modelName });
+  if (isKimi) {
+    debugLog(`${label} 进入Kimi预处理`, { messagesCount: messages.length });
+    try {
+      processedMessages = await preprocessMessagesForKimi(messages, key, url, label);
+      debugLog(`${label} Kimi预处理完成`, { originalCount: messages.length, processedCount: processedMessages.length });
+    } catch (err) {
+      debugLogError(`${label} Kimi预处理异常`, err);
+      throw err;
+    }
+  }
+
   const body: Record<string, unknown> = {
     model: modelName || "glm-4.6v",
-    messages,
+    messages: processedMessages,
     temperature,
     max_tokens: maxTokens,
   };

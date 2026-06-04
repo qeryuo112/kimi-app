@@ -5,7 +5,6 @@ import { LOGIN_PATH } from "@/const";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import {
   Send,
@@ -157,7 +156,7 @@ export default function AiAssistant() {
     : [];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-0px)]">
+    <div className="flex flex-col h-full">
       {/* 头部 */}
       <div className="p-4 border-b border-border flex items-center justify-between bg-card/50">
         <div className="flex items-center gap-3">
@@ -193,8 +192,8 @@ export default function AiAssistant() {
       </div>
 
       {/* 聊天区域 */}
-      <div className="flex-1 overflow-hidden flex flex-col">
-        <ScrollArea className="flex-1" ref={scrollRef}>
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0" ref={scrollRef}>
           <div className="p-4 space-y-4 max-w-4xl mx-auto">
             {messages.length === 0 && !isTyping ? (
               <div className="flex flex-col items-center justify-center py-20">
@@ -280,7 +279,7 @@ export default function AiAssistant() {
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         {/* 输入区域 */}
         <div className="p-4 border-t border-border bg-card/50">
