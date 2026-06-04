@@ -2478,13 +2478,11 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
   const result = await chatWithAI(
     messages,
-    0.6,
     apiKey,
     apiUrl,
     modelName,
     true,
-    "generateWeeklyPlanFromFile",
-    true
+    "generateWeeklyPlanFromFile"
   );
 
   debugLog("generateWeeklyPlanFromFile 收到AI响应", {
@@ -2514,6 +2512,114 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
       resultLast500: result.slice(-500),
       extractedFirst500: extracted.slice(0, 500),
       extractedLast500: extracted.slice(-500),
+    });
+    throw new Error("AI返回的周计划数据格式不正确");
+  }
+}
+
+// 为指定月份生成周计划
+export async function generateMonthlyWeeklyPlanFromFile(
+  fileUrl: string,
+  config: {
+    dailyMinutes: number;
+    monthNumber: number;
+    monthName: string;
+    monthContext: string;
+    weeksInMonth: number;
+    startWeek: number;
+    requirements?: string;
+  },
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<{
+  weeks: Array<{
+    week: number;
+    month: number;
+    focus: string;
+    subjects: string[];
+    knowledgeNodes: string[];
+    goals: string[];
+  }>;
+}> {
+  const systemPrompt = `你是一个科学的学习计划生成AI。请根据文件中的科目和知识树数据，以及该月的计划概览，生成该月的周计划。
+
+【核心要求 - 必须严格遵守】
+1. **只生成指定月份的周计划，不要生成其他月份的周**
+2. 将该月的学习内容细化到周级别
+3. 每周有明确的主题和知识点安排
+4. 考虑知识点依赖关系
+5. 每周聚焦1-2个科目，但**该月所有科目的知识点最终都必须被安排**
+6. **每个知识点都必须分配到该月的具体某一周**
+7. 如果时间紧张，适当降低每个知识点的学习深度，但绝不能跳过任何知识点
+
+请返回JSON格式：
+{
+  "weeks": [{"week":1,"month":1,"focus":"...","subjects":["科目1"],"knowledgeNodes":["知识点1"],"goals":["目标1"]}]
+}`;
+
+  const userPrompt = `请生成第${config.monthNumber}月（${config.monthName}）的周计划，共${config.weeksInMonth}周（第${config.startWeek}周开始）：
+
+每日可用时间：${config.dailyMinutes}分钟
+
+该月计划概览：
+${config.monthContext}
+${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
+
+科目和知识树数据请从提供的文件中读取。`;
+
+  debugLog("generateMonthlyWeeklyPlanFromFile 开始调用AI", { fileUrl, monthNumber: config.monthNumber, weeksInMonth: config.weeksInMonth });
+
+  debugLog("generateMonthlyWeeklyPlanFromFile 请求内容", {
+    systemPromptLength: systemPrompt.length,
+    userPromptLength: userPrompt.length,
+    monthContextLength: config.monthContext?.length || 0
+  });
+
+  const contentBlocks: KimiContent[] = [
+    { type: "file_url", file_url: { url: fileUrl } },
+    { type: "text", text: userPrompt }
+  ];
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: contentBlocks },
+  ];
+
+  const result = await chatWithAI(
+    messages,
+    apiKey,
+    apiUrl,
+    modelName,
+    true,
+    "generateMonthlyWeeklyPlanFromFile"
+  );
+
+  debugLog("generateMonthlyWeeklyPlanFromFile 收到AI响应", {
+    resultLength: result.length,
+    first500Chars: result.slice(0, 500)
+  });
+
+  try {
+    const jsonStr = extractJsonFromResponse(result);
+    debugLog("generateMonthlyWeeklyPlanFromFile 提取JSON", { jsonStrLength: jsonStr.length });
+    const parsed = JSON.parse(jsonStr);
+    const allSubjects = [...new Set(parsed.weeks?.flatMap((w: any) => w.subjects || []))];
+    debugLog("generateMonthlyWeeklyPlanFromFile 解析成功", {
+      weeksCount: parsed.weeks?.length,
+      subjectsCovered: allSubjects,
+      subjectCount: allSubjects.length,
+      sampleWeeks: parsed.weeks?.slice(0, 3)
+    });
+    return { weeks: parsed.weeks || [] };
+  } catch (err) {
+    const extracted = extractJsonFromResponse(result);
+    debugLogError("generateMonthlyWeeklyPlanFromFile JSON解析失败", {
+      error: err instanceof Error ? err.message : String(err),
+      responseLength: result.length,
+      extractedLength: extracted.length,
+      resultFirst500: result.slice(0, 500),
+      resultLast500: result.slice(-500),
     });
     throw new Error("AI返回的周计划数据格式不正确");
   }
@@ -2610,13 +2716,11 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
     const result = await chatWithAI(
       messages,
-      0.6,
       apiKey,
       apiUrl,
       modelName,
       true,
-      `generateDailyPlanFromFile-${startDay}-${endDay}`,
-    true
+      `generateDailyPlanFromFile-${startDay}-${endDay}`
     );
 
     debugLog(`generateDailyPlanFromFile 批次 ${batch + 1}/${totalBatches} 收到AI响应`, {
@@ -2710,13 +2814,11 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
   const result = await chatWithAI(
     messages,
-    0.6,
     apiKey,
     apiUrl,
     modelName,
     true,
-    `generateWeeklyDailyPlanFromFile-week${config.weekNumber}`,
-    true
+    `generateWeeklyDailyPlanFromFile-week${config.weekNumber}`
   );
 
   debugLog("generateWeeklyDailyPlanFromFile 收到AI响应", {

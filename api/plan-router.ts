@@ -38,7 +38,7 @@ import {
   examPapers,
 } from "@db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills, generateCompleteStudyPlanFromFile, generateRoundAndMonthlyPlanFromFile, generateWeeklyPlanFromFile, generateDailyPlanFromFile, generateWeeklyDailyPlanFromFile, generateWeeklyReviewQuestions, evaluateWeeklyReview } from "./lib/ai";
+import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills, generateCompleteStudyPlanFromFile, generateRoundAndMonthlyPlanFromFile, generateWeeklyPlanFromFile, generateMonthlyWeeklyPlanFromFile, generateDailyPlanFromFile, generateWeeklyDailyPlanFromFile, generateWeeklyReviewQuestions, evaluateWeeklyReview } from "./lib/ai";
 
 // ========== 辅助函数：收集计划科目数据并上传到文件服务器 ==========
 
@@ -1067,6 +1067,146 @@ export const planRouter = createRouter({
 
       await db.update(plans).set({ aiPlan: JSON.stringify(updatedPlan) }).where(eq(plans.id, input.id));
       return updatedPlan;
+    }),
+
+  // ========== 为指定月生成周计划（支持 force 重新生成）==========
+  aiGenerateMonthlyWeekly: authedQuery
+    .input(z.object({
+      planId: z.number(),
+      monthNumber: z.number(),
+      requirements: z.string().optional(),
+      force: z.boolean().optional().default(false),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      planDebugLog("aiGenerateMonthlyWeekly 开始", { planId: input.planId, monthNumber: input.monthNumber, force: input.force });
+
+      const db = getDb();
+      const [plan] = await db
+        .select()
+        .from(plans)
+        .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
+
+      if (!plan) throw new Error("计划不存在");
+
+      const aiPlan = plan.aiPlan ? JSON.parse(plan.aiPlan) : null;
+      if (!aiPlan || !aiPlan.monthlyPlan || aiPlan.monthlyPlan.length === 0) {
+        throw new Error("请先生成月计划");
+      }
+
+      const monthData = aiPlan.monthlyPlan.find((m: {month: number}) => m.month === input.monthNumber);
+      if (!monthData) {
+        throw new Error(`第${input.monthNumber}月不存在`);
+      }
+
+      // 检查该月是否已生成（force=true 时允许重新生成）
+      const generatedMonths: number[] = aiPlan.generatedMonths || [];
+      const isRegen = input.force && generatedMonths.includes(input.monthNumber);
+      if (!input.force && generatedMonths.includes(input.monthNumber)) {
+        throw new Error(`第${input.monthNumber}月的周计划已生成`);
+      }
+
+      const startDate = plan.startDate
+        ? new Date(plan.startDate).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0];
+      const totalMonths = plan.totalMonths || 3;
+      const totalWeeks = Math.ceil(totalMonths * 4.3);
+      const weeksPerMonth = Math.round(totalWeeks / totalMonths);
+      const startWeek = (input.monthNumber - 1) * weeksPerMonth + 1;
+
+      const monthContext = `第${monthData.month}月(${monthData.monthName})：${monthData.focus}；科目：${monthData.subjects?.join("、")}；目标：${monthData.goals?.join("。")}`;
+
+      const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
+
+      const fileData = {
+        subjects: subjectsData,
+        month: monthData,
+        config: {
+          dailyMinutes: plan.dailyMinutes,
+          startDate,
+          totalMonths,
+          monthNumber: input.monthNumber,
+          weeksPerMonth,
+          startWeek,
+          requirements: input.requirements,
+        }
+      };
+
+      const { fileUrl, setting } = await uploadDataToFileServer(fileData, "plan-monthly-weekly", ctx.user.id, plan.id);
+      planDebugLog("aiGenerateMonthlyWeekly 文件上传成功", { fileUrl });
+
+      // 调用AI生成该月的周计划
+      const monthlyWeeklyResult = await generateMonthlyWeeklyPlanFromFile(
+        fileUrl,
+        {
+          dailyMinutes: plan.dailyMinutes,
+          monthNumber: input.monthNumber,
+          monthName: monthData.monthName || `第${input.monthNumber}月`,
+          monthContext,
+          weeksInMonth: weeksPerMonth,
+          startWeek,
+          requirements: input.requirements,
+        },
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
+
+      planDebugLog("aiGenerateMonthlyWeekly AI响应完成", {
+        weeksCount: monthlyWeeklyResult.weeks.length,
+      });
+
+      // 合并新生成的周计划（force 重新生成时移除该月旧周计划）
+      const existingWeeks: Array<{
+        week: number;
+        month: number;
+        focus: string;
+        subjects: string[];
+        knowledgeNodes: string[];
+        goals: string[];
+      }> = aiPlan.weeklyPlan || [];
+
+      let mergedWeeks: typeof existingWeeks;
+      if (isRegen) {
+        const filteredWeeks = existingWeeks.filter((w: any) => w.month !== input.monthNumber);
+        mergedWeeks = [...filteredWeeks, ...monthlyWeeklyResult.weeks];
+        planDebugLog("aiGenerateMonthlyWeekly 重新生成：移除旧周计划", { removedCount: existingWeeks.length - filteredWeeks.length });
+      } else {
+        mergedWeeks = [...existingWeeks, ...monthlyWeeklyResult.weeks];
+      }
+      // 按week排序
+      mergedWeeks.sort((a, b) => a.week - b.week);
+
+      // 更新generatedMonths（force 时保持不变）
+      const newGeneratedMonths = isRegen ? generatedMonths : [...generatedMonths, input.monthNumber];
+
+      const updatedPlan = {
+        ...aiPlan,
+        weeklyPlan: mergedWeeks,
+        // 如果重新生成了某月的周计划，清空该月的日计划（因为周变了）
+        dailyPlan: isRegen
+          ? (aiPlan.dailyPlan || []).filter((d: any) => d.month !== input.monthNumber)
+          : aiPlan.dailyPlan,
+        generatedWeeks: isRegen
+          ? (aiPlan.generatedWeeks || []).filter((w: number) => {
+              const weekMonth = Math.ceil(w / weeksPerMonth);
+              return weekMonth !== input.monthNumber;
+            })
+          : aiPlan.generatedWeeks,
+        generatedMonths: newGeneratedMonths,
+      };
+
+      await db
+        .update(plans)
+        .set({ aiPlan: JSON.stringify(updatedPlan) })
+        .where(eq(plans.id, input.planId));
+
+      planDebugLog("aiGenerateMonthlyWeekly 完成", {
+        monthNumber: input.monthNumber,
+        weeksCount: monthlyWeeklyResult.weeks.length,
+        totalWeeks: mergedWeeks.length
+      });
+
+      return { success: true, monthNumber: input.monthNumber, weeksCount: monthlyWeeklyResult.weeks.length };
     }),
 
   // ========== 重新生成月计划（月计划变了，周/日需清空）==========

@@ -158,6 +158,22 @@ export default function Plans() {
     onError: (err) => toast.error(err.message),
   });
 
+  // 按月生成周计划（支持重新生成）
+  const [generatingMonth, setGeneratingMonth] = useState<number | null>(null);
+  const aiGenerateMonthlyWeekly = trpc.plan.aiGenerateMonthlyWeekly.useMutation({
+    onSuccess: (data) => {
+      if (expandedPlan !== null) {
+        utils.plan.getById.invalidate({ id: expandedPlan });
+      }
+      toast.success(`第${data.monthNumber}月周计划生成成功！共 ${data.weeksCount} 周`);
+      setGeneratingMonth(null);
+    },
+    onError: (err) => {
+      toast.error(`生成失败: ${err.message}`);
+      setGeneratingMonth(null);
+    },
+  });
+
   // 按周生成日计划（支持重新生成）
   const [generatingWeek, setGeneratingWeek] = useState<number | null>(null);
   const aiGenerateWeeklyDaily = trpc.plan.aiGenerateWeeklyDaily.useMutation({
@@ -868,32 +884,83 @@ export default function Plans() {
 
                                   {/* 月计划 */}
                                   <TabsContent value="months" className="space-y-2 mt-3">
-                                    {hasMonthly ? schedule.monthlyPlan.map((m: any, i: number) => (
-                                      <div key={i} className="p-3 rounded-lg bg-secondary/20 border border-border">
-                                        <div className="flex items-center justify-between">
-                                          <span className="font-medium">{m.monthName || `第${m.month}个月`}</span>
-                                          <div className="flex gap-1">
-                                            <Badge variant="outline">第{m.round}轮</Badge>
-                                            <Badge variant="outline">{m.subjects?.length || 0}科</Badge>
+                                    {hasMonthly ? schedule.monthlyPlan.map((m: any, i: number) => {
+                                      const monthNum = m.month;
+                                      const isMonthGenerating = generatingMonth === monthNum;
+                                      const generatedMonths: number[] = schedule.generatedMonths || [];
+                                      const hasWeeklyForMonth = schedule.weeklyPlan?.some((w: any) => w.month === monthNum);
+                                      const isGenerated = generatedMonths.includes(monthNum) || hasWeeklyForMonth;
+
+                                      return (
+                                        <div key={i} className="p-3 rounded-lg bg-secondary/20 border border-border">
+                                          <div className="flex items-center justify-between">
+                                            <span className="font-medium">{m.monthName || `第${m.month}个月`}</span>
+                                            <div className="flex gap-1">
+                                              <Badge variant="outline">第{m.round}轮</Badge>
+                                              <Badge variant="outline">{m.subjects?.length || 0}科</Badge>
+                                            </div>
                                           </div>
-                                        </div>
-                                        <p className="text-sm text-primary mt-1">{m.focus}</p>
-                                        <div className="flex flex-wrap gap-1 mt-1.5">
-                                          {m.subjects?.map((s: string, idx: number) => (
-                                            <Badge key={idx} variant="secondary" className="text-xs">{s}</Badge>
-                                          ))}
-                                        </div>
-                                        {m.goals && m.goals.length > 0 && (
-                                          <div className="mt-2 space-y-0.5">
-                                            {m.goals.map((g: string, idx: number) => (
-                                              <p key={idx} className="text-xs text-muted-foreground flex items-center gap-1">
-                                                <Target className="h-3 w-3" />{g}
-                                              </p>
+                                          <p className="text-sm text-primary mt-1">{m.focus}</p>
+                                          <div className="flex flex-wrap gap-1 mt-1.5">
+                                            {m.subjects?.map((s: string, idx: number) => (
+                                              <Badge key={idx} variant="secondary" className="text-xs">{s}</Badge>
                                             ))}
                                           </div>
-                                        )}
-                                      </div>
-                                    )) : <p className="text-sm text-muted-foreground">暂无月计划</p>}
+                                          {m.goals && m.goals.length > 0 && (
+                                            <div className="mt-2 space-y-0.5">
+                                              {m.goals.map((g: string, idx: number) => (
+                                                <p key={idx} className="text-xs text-muted-foreground flex items-center gap-1">
+                                                  <Target className="h-3 w-3" />{g}
+                                                </p>
+                                              ))}
+                                            </div>
+                                          )}
+                                          <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
+                                            {isMonthGenerating ? (
+                                              <Button variant="ghost" size="sm" disabled className="w-full h-7 text-xs">
+                                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                                生成中...
+                                              </Button>
+                                            ) : isGenerated ? (
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full h-7 text-xs"
+                                                onClick={() => {
+                                                  setGeneratingMonth(monthNum);
+                                                  aiGenerateMonthlyWeekly.mutate({
+                                                    planId: plan.id,
+                                                    monthNumber: monthNum,
+                                                    requirements: planRequirements[plan.id] || undefined,
+                                                    force: true,
+                                                  });
+                                                }}
+                                              >
+                                                <Sparkles className="h-3 w-3 mr-1" />
+                                                重新生成周计划
+                                              </Button>
+                                            ) : (
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full h-7 text-xs"
+                                                onClick={() => {
+                                                  setGeneratingMonth(monthNum);
+                                                  aiGenerateMonthlyWeekly.mutate({
+                                                    planId: plan.id,
+                                                    monthNumber: monthNum,
+                                                    requirements: planRequirements[plan.id] || undefined,
+                                                  });
+                                                }}
+                                              >
+                                                <Sparkles className="h-3 w-3 mr-1" />
+                                                生成周计划
+                                              </Button>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    }) : <p className="text-sm text-muted-foreground">暂无月计划</p>}
                                   </TabsContent>
 
                                   {/* 周计划 */}
