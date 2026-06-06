@@ -6,12 +6,15 @@ import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env } from "./lib/env";
 import path from "path";
-import fs from "fs";
 import { nanoid } from "nanoid";
+import { uploadBufferToOSS, isOSSConfigured } from "./lib/oss";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
-// 文件上传端点
+// Body 大小限制（对所有后续路由生效）
+app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
+
+// 文件上传端点（仅支持 OSS）
 app.post("/upload", async (c) => {
   try {
     const body = await c.req.parseBody();
@@ -19,6 +22,10 @@ app.post("/upload", async (c) => {
 
     if (!file) {
       return c.json({ error: "No file provided" }, 400);
+    }
+
+    if (!isOSSConfigured()) {
+      return c.json({ error: "OSS not configured" }, 503);
     }
 
     // 检查文件类型
@@ -44,22 +51,13 @@ app.post("/upload", async (c) => {
       return c.json({ error: "File too large (max 20MB)" }, 400);
     }
 
-    // 生成文件名
+    // 生成文件名并上传到 OSS
     const ext = path.extname(file.name);
     const fileName = `${Date.now()}_${nanoid(6)}${ext}`;
-
-    // 保存到上传目录
-    const uploadDir = path.join(process.cwd(), "public", "uploads");
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-
-    const filePath = path.join(uploadDir, fileName);
     const buffer = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(filePath, buffer);
+    const key = `uploads/${fileName}`;
+    const url = await uploadBufferToOSS(buffer, key, file.type);
 
-    // 返回文件URL
-    const url = `/uploads/${fileName}`;
     return c.json({ url, name: file.name, size: file.size });
   } catch (error) {
     console.error("Upload error:", error);
@@ -67,7 +65,6 @@ app.post("/upload", async (c) => {
   }
 });
 
-app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({
     endpoint: "/api/trpc",

@@ -45,14 +45,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, isLoading, isAuthenticated, logout } = useAuth();
+  console.log("[Layout] render state:", { isLoading, isAuthenticated, path: location.pathname, userId: user?.id });
 
   useEffect(() => {
+    console.log("[Layout] auth effect:", { isLoading, isAuthenticated });
     if (!isLoading && !isAuthenticated) {
+      console.log("[Layout] redirecting to /login");
       navigate("/login", { replace: true });
     }
   }, [isLoading, isAuthenticated, navigate]);
 
   if (isLoading) {
+    console.log("[Layout] showing loading screen");
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="text-muted-foreground">加载中...</div>
@@ -60,7 +64,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated) {
+    console.log("[Layout] not authenticated, returning null (black screen)");
+    return null;
+  }
 
   return (
     <div className="flex h-screen bg-background">

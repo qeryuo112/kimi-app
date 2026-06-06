@@ -151,9 +151,6 @@ export default function Subjects() {
       return;
     }
 
-    const fileServerUrl = settings?.fileServerUrl?.trim() || window.location.origin;
-    console.log("[DEBUG] fileServerUrl:", fileServerUrl);
-
     setIsUploading(true);
     const newFiles: Array<{ url: string; name: string }> = [];
 
@@ -162,9 +159,7 @@ export default function Subjects() {
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
-        console.log("[DEBUG] uploadUrl:", uploadUrl);
-        const res = await fetch(uploadUrl, {
+        const res = await fetch("/upload", {
           method: "POST",
           body: formData,
         });

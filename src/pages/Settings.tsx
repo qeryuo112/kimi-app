@@ -47,7 +47,6 @@ export default function SettingsPage() {
     aiModel: "glm-4.6v",
     aiApiKey: "",
     aiApiEndpoint: "",
-    fileServerUrl: "",
     aiMaxTokens: 128000,
     aiEnableThinking: true,
     aiTemperature: 0.5,
@@ -64,7 +63,6 @@ export default function SettingsPage() {
         aiModel: settings.aiModel || "glm-4.6v",
         aiApiKey: settings.aiApiKey || "",
         aiApiEndpoint: settings.aiApiEndpoint || "",
-        fileServerUrl: settings.fileServerUrl || "",
         aiMaxTokens: settings.aiMaxTokens || 128000,
         aiEnableThinking: settings.aiEnableThinking ?? true,
         aiTemperature: settings.aiTemperature ?? 0.5,
@@ -228,26 +226,6 @@ export default function SettingsPage() {
                     onChange={(e) => setForm({ ...form, aiApiKey: e.target.value })}
                   />
                 </div>
-              </div>
-
-              <div className="space-y-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  文件上传服务器地址
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-semibold">全局</span>
-                  {!isAdmin && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">仅管理员可编辑</span>
-                  )}
-                </label>
-                <Input
-                  placeholder="http://你的VPS_IP:3001（用于文档识别上传）"
-                  value={form.fileServerUrl}
-                  onChange={(e) => setForm({ ...form, fileServerUrl: e.target.value })}
-                  disabled={!isAdmin}
-                  className={!isAdmin ? "bg-muted cursor-not-allowed" : ""}
-                />
-                <p className="text-xs text-muted-foreground">
-                  全账号通用配置。配置后，所有用户的文档识别功能都会将文件上传到此服务器。未配置时可在识别面板手动粘贴URL。
-                </p>
               </div>
 
               <div className="space-y-2 p-3 rounded-lg bg-primary/5 border border-primary/20">

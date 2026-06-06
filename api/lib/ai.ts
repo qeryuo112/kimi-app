@@ -1,4 +1,4 @@
-// AI服务模块 - 调用Kimi API进行内容分析
+// AI服务模块 - 调用OpenAI兼容API进行内容分析
 import { env } from "./env";
 import fs from "fs";
 import path from "path";
@@ -6,6 +6,7 @@ import axios from "axios";
 import { getDb } from "../queries/connection";
 import { appSettings } from "@db/schema";
 import { eq } from "drizzle-orm";
+import { processUrlsToContentBlocks, type ProcessedContent } from "./document-processor";
 
 const DEFAULT_MAX_TOKENS = 128000;
 
@@ -166,120 +167,6 @@ interface KimiResponse {
   }>;
 }
 
-// ========== Kimi 文件适配 ==========
-
-/** 检测目标平台是否为 Kimi（Moonshot） */
-function isKimiPlatform(_apiUrl?: string, modelName?: string): boolean {
-  const model = (modelName || "").toLowerCase();
-  return model.startsWith("kimi");
-}
-
-/** 从 API URL 提取 base URL（用于文件上传接口） */
-function getBaseUrlFromApiUrl(apiUrl: string): string {
-  return apiUrl.replace(/\/chat\/completions$/, "").replace(/\/$/, "");
-}
-
-/** 下载文件到 Buffer */
-async function downloadFileToBuffer(url: string): Promise<Buffer> {
-  const response = await axios.get(url, {
-    responseType: "arraybuffer",
-    timeout: 30000,
-    maxContentLength: 50 * 1024 * 1024, // 50MB 上限
-  });
-  return Buffer.from(response.data);
-}
-
-/** 通过 Kimi /v1/files 接口上传文件并提取内容 */
-async function extractFileContentWithKimi(
-  fileBuffer: Buffer,
-  fileName: string,
-  apiKey: string,
-  baseUrl: string
-): Promise<string> {
-  // 1. 上传文件到 Kimi
-  const formData = new FormData();
-  formData.append("file", new Blob([fileBuffer]), fileName);
-  formData.append("purpose", "file-extract");
-
-  const uploadRes = await fetch(`${baseUrl}/files`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: formData,
-  });
-
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text().catch(() => "unknown");
-    throw new Error(`Kimi 文件上传失败: ${uploadRes.status} - ${errText}`);
-  }
-
-  const uploadData = await uploadRes.json();
-  const fileId = uploadData.id;
-  if (!fileId) {
-    throw new Error("Kimi 文件上传响应缺少 id");
-  }
-
-  // 2. 获取文件内容
-  const contentRes = await fetch(`${baseUrl}/files/${fileId}/content`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-
-  if (!contentRes.ok) {
-    const errText = await contentRes.text().catch(() => "unknown");
-    throw new Error(`Kimi 文件内容获取失败: ${contentRes.status} - ${errText}`);
-  }
-
-  return await contentRes.text();
-}
-
-/** 预处理消息：将 file_url 转为文本内容（仅对 Kimi 平台） */
-async function preprocessMessagesForKimi(
-  messages: KimiMessage[],
-  apiKey: string,
-  apiUrl: string,
-  label: string
-): Promise<KimiMessage[]> {
-  const baseUrl = getBaseUrlFromApiUrl(apiUrl);
-  debugLog(`${label} preprocessMessagesForKimi开始`, { messageCount: messages.length, baseUrl });
-
-  const result: KimiMessage[] = [];
-  for (let mi = 0; mi < messages.length; mi++) {
-    const msg = messages[mi];
-    if (typeof msg.content === "string") {
-      debugLog(`${label} 消息${mi}是字符串，跳过`, { role: msg.role, length: msg.content.length });
-      result.push(msg);
-      continue;
-    }
-
-    debugLog(`${label} 消息${mi}是数组`, { role: msg.role, blockCount: msg.content.length });
-    const newContent: KimiContent[] = [];
-    for (let bi = 0; bi < msg.content.length; bi++) {
-      const block = msg.content[bi];
-      debugLog(`${label} 消息${mi}块${bi}类型`, { type: block.type });
-      if (block.type === "file_url") {
-        const url = block.file_url.url;
-        try {
-          debugLog(`${label} Kimi文件提取开始`, { url });
-          const buffer = await downloadFileToBuffer(url);
-          debugLog(`${label} 文件下载成功`, { url, size: buffer.length });
-          const fileName = url.split("/").pop()?.split("?")[0] || "file";
-          const text = await extractFileContentWithKimi(buffer, fileName, apiKey, baseUrl);
-          debugLog(`${label} Kimi文件提取成功`, { url, contentLength: text.length });
-          newContent.push({ type: "text", text: `[文件内容]\n${text}\n[/文件内容]` });
-        } catch (err) {
-          debugLogError(`${label} Kimi文件提取失败`, { url, error: err });
-          // 保留原样，让下游请求自然报错，便于排查
-          newContent.push(block);
-        }
-      } else {
-        newContent.push(block);
-      }
-    }
-    result.push({ ...msg, content: newContent });
-  }
-  debugLog(`${label} preprocessMessagesForKimi完成`, { resultCount: result.length });
-  return result;
-}
-
 // 调用AI API进行对话
 export async function chatWithAI(
   messages: KimiMessage[],
@@ -307,24 +194,9 @@ export async function chatWithAI(
     getAiTemperature(),
   ]);
 
-  // Kimi 平台适配：将 file_url 内容提取为文本
-  let processedMessages = messages;
-  const isKimi = isKimiPlatform(url, modelName);
-  debugLog(`${label} 平台检测`, { isKimi, url, modelName });
-  if (isKimi) {
-    debugLog(`${label} 进入Kimi预处理`, { messagesCount: messages.length });
-    try {
-      processedMessages = await preprocessMessagesForKimi(messages, key, url, label);
-      debugLog(`${label} Kimi预处理完成`, { originalCount: messages.length, processedCount: processedMessages.length });
-    } catch (err) {
-      debugLogError(`${label} Kimi预处理异常`, err);
-      throw err;
-    }
-  }
-
   const body: Record<string, unknown> = {
     model: modelName || "glm-4.6v",
-    messages: processedMessages,
+    messages,
     temperature,
     max_tokens: maxTokens,
   };
@@ -591,23 +463,14 @@ export async function analyzeFilesForKnowledgeTree(
   ]
 }`;
 
-  // 构建多模态内容块
-  const contentBlocks: KimiContent[] = urls.map((url) => {
-    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-    if (imageExts.includes(ext)) {
-      return { type: "image_url", image_url: { url } };
-    }
-    return { type: "file_url", file_url: { url } };
-  });
-
   const userPrompt = `请从以上文件中提取知识树结构，科目名称：${title}`;
+  const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
     {
       role: "user",
-      content: [...contentBlocks, { type: "text", text: userPrompt }],
+      content: [...contentBlocks as KimiContent[], { type: "text", text: userPrompt }],
     },
   ];
 
@@ -769,23 +632,14 @@ export async function analyzeFilesForSkills(
   ]
 }`;
 
-  // 构建多模态内容块
-  const contentBlocks: KimiContent[] = urls.map((url) => {
-    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-    if (imageExts.includes(ext)) {
-      return { type: "image_url", image_url: { url } };
-    }
-    return { type: "file_url", file_url: { url } };
-  });
-
   const userPrompt = `请从以上文件中提取技能维度，科目名称：${title}`;
+  const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
     {
       role: "user",
-      content: [...contentBlocks, { type: "text", text: userPrompt }],
+      content: [...contentBlocks as KimiContent[], { type: "text", text: userPrompt }],
     },
   ];
 
@@ -1288,26 +1142,14 @@ export async function generateQuestionsFromFileUrls(
 }`;
 
   // 构建多模态内容
-  const contentBlocks: KimiContent[] = urls.map((url) => {
-    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-    const videoExts = ["mp4", "mov", "avi", "mkv", "webm"];
-    if (imageExts.includes(ext)) {
-      return { type: "image_url", image_url: { url } };
-    }
-    if (videoExts.includes(ext)) {
-      return { type: "video_url", video_url: { url } };
-    }
-    return { type: "file_url", file_url: { url } };
-  });
-
   const userPrompt = `请根据文件内容生成 ${count} 道 ${typeDesc}，难度要求 ${difficulty}/5。`;
+  const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
     {
       role: "user",
-      content: [...contentBlocks, { type: "text", text: userPrompt }],
+      content: [...contentBlocks as KimiContent[], { type: "text", text: userPrompt }],
     },
   ];
 
@@ -1925,18 +1767,7 @@ export async function generateTodoTestFromFiles(
 }`;
 
   // 构建多模态内容
-  const contentBlocks: KimiContent[] = urls.map((url) => {
-    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-    const videoExts = ["mp4", "mov", "avi", "mkv", "webm"];
-    if (imageExts.includes(ext)) {
-      return { type: "image_url", image_url: { url } };
-    }
-    if (videoExts.includes(ext)) {
-      return { type: "video_url", video_url: { url } };
-    }
-    return { type: "file_url", file_url: { url } };
-  });
+  const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
 
   const userPrompt = `请根据文件内容生成${count}道${typeDesc}。
 
@@ -2026,26 +1857,14 @@ export async function recognizeQuestionsFromUrls(
   ]
 }`;
 
-  const contentBlocks: KimiContent[] = urls.map((url) => {
-    const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-    const videoExts = ["mp4", "mov", "avi", "mkv", "webm"];
-    if (imageExts.includes(ext)) {
-      return { type: "image_url", image_url: { url } };
-    }
-    if (videoExts.includes(ext)) {
-      return { type: "video_url", video_url: { url } };
-    }
-    return { type: "file_url", file_url: { url } };
-  });
-
   const userPrompt = `请从以下文件中识别出所有${typeDesc}，每道题标注难度(1-5)。如果文档中有多个题目，请全部识别出来。`;
+  const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
     {
       role: "user",
-      content: [...contentBlocks, { type: "text", text: userPrompt }],
+      content: [...contentBlocks as KimiContent[], { type: "text", text: userPrompt }],
     },
   ];
 
@@ -2098,19 +1917,12 @@ ${contextData ? JSON.stringify(contextData, null, 2) : "暂无上下文数据"}
     const isLastUserMessage = m.role === "user" && i === messages.length - 1;
 
     if (isLastUserMessage && fileUrls && fileUrls.length > 0) {
-      // 最后一条用户消息：插入 file_url 内容块
-      const contentBlocks: KimiContent[] = fileUrls.map((url) => {
-        const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
-        const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-        if (imageExts.includes(ext)) {
-          return { type: "image_url", image_url: { url } };
-        }
-        return { type: "file_url", file_url: { url } };
-      });
+      // 最后一条用户消息：插入附件内容块
+      const contentBlocks = await processUrlsToContentBlocks(fileUrls, { modelName, apiKey });
       contentBlocks.push({ type: "text", text: m.content || "请分析以上文件内容" });
       chatMessages.push({
         role: "user",
-        content: contentBlocks,
+        content: contentBlocks as KimiContent[],
       } as KimiMessage);
     } else {
       chatMessages.push({
@@ -2269,7 +2081,7 @@ ${localNodes ? JSON.stringify(localNodes.map(n => ({ id: n.id, title: n.title, s
 // ========== 从文件生成完整复习计划（优化版） ==========
 
 export async function generateCompleteStudyPlanFromFile(
-  fileUrl: string,
+  fileUrlOrData: string | unknown,
   config: {
     dailyMinutes: number;
     startDate: string;
@@ -2353,16 +2165,20 @@ ${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
 
 科目和知识树数据请从提供的文件中读取。`;
 
-  debugLog("generateCompleteStudyPlanFromFile 开始调用AI", { fileUrl, config });
+  debugLog("generateCompleteStudyPlanFromFile 开始调用AI", { fileUrlOrData, config });
 
-  const contentBlocks: KimiContent[] = [
-    { type: "file_url", file_url: { url: fileUrl } },
-    { type: "text", text: userPrompt }
-  ];
+  let contentBlocks: ProcessedContent[];
+  if (typeof fileUrlOrData === "string") {
+    contentBlocks = await processUrlsToContentBlocks([fileUrlOrData], { modelName, apiKey });
+  } else {
+    const json = JSON.stringify(fileUrlOrData, null, 2);
+    contentBlocks = [{ type: "text", text: `[数据内容]\n${json}\n[/数据内容]` }];
+  }
+  contentBlocks.push({ type: "text", text: userPrompt });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: contentBlocks },
+    { role: "user", content: contentBlocks as KimiContent[] },
   ];
 
   const result = await chatWithAI(
@@ -2396,7 +2212,7 @@ ${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
 }
 // 从文件生成轮次和月计划
 export async function generateRoundAndMonthlyPlanFromFile(
-  fileUrl: string,
+  fileUrlOrData: string | unknown,
   config: {
     dailyMinutes: number;
     startDate: string;
@@ -2449,12 +2265,16 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
 科目和知识树数据请从提供的文件中读取。`;
 
-  debugLog("generateRoundAndMonthlyPlanFromFile 开始调用AI", { fileUrl, config });
+  debugLog("generateRoundAndMonthlyPlanFromFile 开始调用AI", { fileUrlOrData, config });
 
-  const contentBlocks: KimiContent[] = [
-    { type: "file_url", file_url: { url: fileUrl } },
-    { type: "text", text: userPrompt }
-  ];
+  let contentBlocks: ProcessedContent[];
+  if (typeof fileUrlOrData === "string") {
+    contentBlocks = await processUrlsToContentBlocks([fileUrlOrData], { modelName, apiKey });
+  } else {
+    const json = JSON.stringify(fileUrlOrData, null, 2);
+    contentBlocks = [{ type: "text", text: `[数据内容]\n${json}\n[/数据内容]` }];
+  }
+  contentBlocks.push({ type: "text", text: userPrompt });
 
   debugLog("generateRoundAndMonthlyPlanFromFile 请求内容", {
     systemPromptLength: systemPrompt.length,
@@ -2513,7 +2333,7 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
 // 从文件生成周计划
 export async function generateWeeklyPlanFromFile(
-  fileUrl: string,
+  fileUrlOrData: string | unknown,
   config: {
     dailyMinutes: number;
     totalWeeks: number;
@@ -2559,7 +2379,7 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
 科目和知识树数据请从提供的文件中读取。`;
 
-  debugLog("generateWeeklyPlanFromFile 开始调用AI", { fileUrl, totalWeeks: config.totalWeeks });
+  debugLog("generateWeeklyPlanFromFile 开始调用AI", { fileUrlOrData, totalWeeks: config.totalWeeks });
 
   debugLog("generateWeeklyPlanFromFile 请求内容", {
     systemPromptLength: systemPrompt.length,
@@ -2567,14 +2387,18 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
     monthlyContextLength: config.monthlyContext?.length || 0
   });
 
-  const contentBlocks: KimiContent[] = [
-    { type: "file_url", file_url: { url: fileUrl } },
-    { type: "text", text: userPrompt }
-  ];
+  let contentBlocks: ProcessedContent[];
+  if (typeof fileUrlOrData === "string") {
+    contentBlocks = await processUrlsToContentBlocks([fileUrlOrData], { modelName, apiKey });
+  } else {
+    const json = JSON.stringify(fileUrlOrData, null, 2);
+    contentBlocks = [{ type: "text", text: `[数据内容]\n${json}\n[/数据内容]` }];
+  }
+  contentBlocks.push({ type: "text", text: userPrompt });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: contentBlocks },
+    { role: "user", content: contentBlocks as KimiContent[] },
   ];
 
   const result = await chatWithAI(
@@ -2677,14 +2501,18 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
     monthContextLength: config.monthContext?.length || 0
   });
 
-  const contentBlocks: KimiContent[] = [
-    { type: "file_url", file_url: { url: fileUrl } },
-    { type: "text", text: userPrompt }
-  ];
+  let contentBlocks: ProcessedContent[];
+  if (typeof fileUrl === "string") {
+    contentBlocks = await processUrlsToContentBlocks([fileUrl], { modelName, apiKey });
+  } else {
+    const json = JSON.stringify(fileUrl, null, 2);
+    contentBlocks = [{ type: "text", text: `[数据内容]\n${json}\n[/数据内容]` }];
+  }
+  contentBlocks.push({ type: "text", text: userPrompt });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: contentBlocks },
+    { role: "user", content: contentBlocks as KimiContent[] },
   ];
 
   const result = await chatWithAI(
@@ -2728,7 +2556,7 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
 // 从文件生成日计划（分批）
 export async function generateDailyPlanFromFile(
-  fileUrl: string,
+  fileUrlOrData: string | unknown,
   config: {
     dailyMinutes: number;
     startDate: string;
@@ -2805,14 +2633,12 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
       userPromptLength: userPrompt.length
     });
 
-    const contentBlocks: KimiContent[] = [
-      { type: "file_url", file_url: { url: fileUrl } },
-      { type: "text", text: userPrompt }
-    ];
+    const contentBlocks = await processUrlsToContentBlocks([fileUrlOrData as string], { modelName, apiKey });
+    contentBlocks.push({ type: "text", text: userPrompt });
 
     const messages: KimiMessage[] = [
       { role: "system", content: systemPrompt },
-      { role: "user", content: contentBlocks },
+      { role: "user", content: contentBlocks as KimiContent[] },
     ];
 
     const result = await chatWithAI(
@@ -2848,7 +2674,7 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
 // 为单周生成日计划（7天）
 export async function generateWeeklyDailyPlanFromFile(
-  fileUrl: string,
+  fileUrlOrData: string | unknown,
   config: {
     dailyMinutes: number;
     startDate: string;
@@ -2903,14 +2729,18 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
 科目和知识树数据请从提供的文件中读取。`;
 
-  const contentBlocks: KimiContent[] = [
-    { type: "file_url", file_url: { url: fileUrl } },
-    { type: "text", text: userPrompt }
-  ];
+  let contentBlocks: ProcessedContent[];
+  if (typeof fileUrlOrData === "string") {
+    contentBlocks = await processUrlsToContentBlocks([fileUrlOrData], { modelName, apiKey });
+  } else {
+    const json = JSON.stringify(fileUrlOrData, null, 2);
+    contentBlocks = [{ type: "text", text: `[数据内容]\n${json}\n[/数据内容]` }];
+  }
+  contentBlocks.push({ type: "text", text: userPrompt });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: contentBlocks },
+    { role: "user", content: contentBlocks as KimiContent[] },
   ];
 
   const result = await chatWithAI(
@@ -2958,7 +2788,7 @@ ${config.requirements ? `\n特殊需求：${config.requirements}` : ""}
 
 // 生成周回顾测试题目
 export async function generateWeeklyReviewQuestions(
-  fileUrl: string,
+  fileUrlOrData: string | unknown,
   weekData: {
     weekNumber: number;
     knowledgeNodes: string[];
@@ -3013,14 +2843,18 @@ export async function generateWeeklyReviewQuestions(
 
 请从提供的文件中读取详细内容，生成测试题。`;
 
-  const contentBlocks: KimiContent[] = [
-    { type: "file_url", file_url: { url: fileUrl } },
-    { type: "text", text: userPrompt }
-  ];
+  let contentBlocks: ProcessedContent[];
+  if (typeof fileUrlOrData === "string") {
+    contentBlocks = await processUrlsToContentBlocks([fileUrlOrData], { modelName, apiKey });
+  } else {
+    const json = JSON.stringify(fileUrlOrData, null, 2);
+    contentBlocks = [{ type: "text", text: `[数据内容]\n${json}\n[/数据内容]` }];
+  }
+  contentBlocks.push({ type: "text", text: userPrompt });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: contentBlocks },
+    { role: "user", content: contentBlocks as KimiContent[] },
   ];
 
   const result = await chatWithAI(
@@ -3052,7 +2886,7 @@ export async function generateWeeklyReviewQuestions(
 
 // 评估周回顾测试结果
 export async function evaluateWeeklyReview(
-  fileUrl: string,
+  fileUrlOrData: string | unknown,
   weekData: {
     weekNumber: number;
     knowledgeNodes: string[];
@@ -3109,14 +2943,18 @@ ${answers.map((a, i) => `第${i + 1}题(${a.knowledgeNode})：用户答案"${a.u
 
 请给出详细评估报告。`;
 
-  const contentBlocks: KimiContent[] = [
-    { type: "file_url", file_url: { url: fileUrl } },
-    { type: "text", text: userPrompt }
-  ];
+  let contentBlocks: ProcessedContent[];
+  if (typeof fileUrlOrData === "string") {
+    contentBlocks = await processUrlsToContentBlocks([fileUrlOrData], { modelName, apiKey });
+  } else {
+    const json = JSON.stringify(fileUrlOrData, null, 2);
+    contentBlocks = [{ type: "text", text: `[数据内容]\n${json}\n[/数据内容]` }];
+  }
+  contentBlocks.push({ type: "text", text: userPrompt });
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: contentBlocks },
+    { role: "user", content: contentBlocks as KimiContent[] },
   ];
 
   const result = await chatWithAI(

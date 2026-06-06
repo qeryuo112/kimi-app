@@ -310,17 +310,11 @@ export default function Questions() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const fileServerUrl = settings?.fileServerUrl?.trim();
-    if (!fileServerUrl) {
-      toast.error("请先在设置中配置文件上传服务器地址");
-      return;
-    }
-
     setIsEditImageUploading(true);
     const formData = new FormData();
     formData.append("file", file);
     try {
-      const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+      const res = await fetch("/upload", {
         method: "POST",
         body: formData,
       });
@@ -386,18 +380,12 @@ export default function Questions() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const fileServerUrl = settings?.fileServerUrl?.trim();
-    if (!fileServerUrl) {
-      toast.error("请先在设置中配置文件上传服务器地址");
-      return;
-    }
-
     setIsGenUploading(true);
     for (const file of Array.from(files)) {
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+        const res = await fetch("/upload", {
           method: "POST",
           body: formData,
         });
@@ -434,18 +422,12 @@ export default function Questions() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const fileServerUrl = settings?.fileServerUrl?.trim();
-    if (!fileServerUrl) {
-      toast.error("请先在设置中配置文件上传服务器地址");
-      return;
-    }
-
     setIsUploading(true);
     for (const file of Array.from(files)) {
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const res = await fetch(`${fileServerUrl.replace(/\/$/, "")}/upload`, {
+        const res = await fetch("/upload", {
           method: "POST",
           body: formData,
         });

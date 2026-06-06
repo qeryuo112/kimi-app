@@ -5,6 +5,7 @@ import { questions, userAnswers, wrongAnswers, knowledgeNodes, userSettings, sub
 import { eq, and, desc, sql } from "drizzle-orm";
 import { generateQuestions, generateQuestionsFromFileUrls, evaluateAnswer, recognizeQuestionsFromUrls, chatWithAI } from "./lib/ai";
 import type { KimiContent } from "./lib/ai";
+import { processUrlsToContentBlocks } from "./lib/document-processor";
 
 export const questionRouter = createRouter({
   // 列出题库中的题目
@@ -449,19 +450,7 @@ export const questionRouter = createRouter({
           model: setting?.aiModel,
         });
 
-        // 构建多模态消息
-        const contentBlocks: KimiContent[] = [];
-
-        // 添加图片
-        const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-        const ext = mergedImageUrl.split("?")[0].split(".").pop()?.toLowerCase() || "";
-        if (imageExts.includes(ext)) {
-          contentBlocks.push({ type: "image_url", image_url: { url: mergedImageUrl, detail: "high" } });
-          console.log("[question.update] 使用 image_url 发送图片", { url: mergedImageUrl, ext });
-        } else {
-          contentBlocks.push({ type: "file_url", file_url: { url: mergedImageUrl } });
-          console.log("[question.update] 使用 file_url 发送文件", { url: mergedImageUrl, ext });
-        }
+        const contentBlocks = await processUrlsToContentBlocks([mergedImageUrl]);
 
         // 添加题干文字
         let promptText = `请根据以下题目内容${mergedImageUrl ? "和图片" : ""}，重新生成或修正正确答案和详细解析。\n\n题目内容：\n${mergedContent}`;

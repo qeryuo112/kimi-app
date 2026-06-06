@@ -23,11 +23,15 @@ export default function Login() {
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: (data) => {
+      console.log("[Login] login success, userId=", data.userId);
       setCookie("kimiokc_session", data.token, 7);
+      console.log("[Login] cookie set, document.cookie=", document.cookie);
       toast.success("登录成功");
+      console.log("[Login] redirecting to /");
       window.location.href = "/";
     },
     onError: (err) => {
+      console.error("[Login] login error:", err);
       toast.error(err.message || "登录失败");
     },
   });

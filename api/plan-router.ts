@@ -88,47 +88,12 @@ async function collectPlanSubjectsData(planId: number, userId: number) {
   return { planSubs, subjectsData };
 }
 
-async function uploadDataToFileServer(data: unknown, fileNamePrefix: string, userId: number, planId: number) {
+async function getUserAiSetting(userId: number) {
   const [setting] = await getDb()
     .select()
     .from(userSettings)
     .where(eq(userSettings.userId, userId));
-
-  const fileServerUrl = setting?.fileServerUrl?.trim();
-  if (!fileServerUrl) {
-    throw new Error("请先设置文件上传服务器地址。在「设置」页配置 fileServerUrl（如 http://VPS_IP:3001）");
-  }
-
-  const tempDir = path.join(process.cwd(), "temp");
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  const tempFileName = `${fileNamePrefix}-${userId}-${planId}-${Date.now()}.txt`;
-  const tempFilePath = path.join(tempDir, tempFileName);
-  fs.writeFileSync(tempFilePath, JSON.stringify(data, null, 2));
-
-  const uploadFormData = new FormData();
-  const fileBuffer = fs.readFileSync(tempFilePath);
-  const blob = new Blob([fileBuffer], { type: "application/json" });
-  uploadFormData.append("file", blob, tempFileName);
-
-  const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
-  const uploadRes = await fetch(uploadUrl, { method: "POST", body: uploadFormData });
-
-  try { fs.unlinkSync(tempFilePath); } catch {}
-
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text().catch(() => "{}");
-    throw new Error(`文件上传失败: ${uploadRes.status} - ${errText}`);
-  }
-
-  const uploadData = await uploadRes.json();
-  const fileUrl = uploadData.url;
-  if (!fileUrl) {
-    throw new Error("文件上传响应中缺少URL");
-  }
-
-  return { fileUrl, setting };
+  return setting;
 }
 
 export const planRouter = createRouter({
@@ -798,92 +763,14 @@ export const planRouter = createRouter({
         }
       };
 
-      // 获取文件服务器URL
-      const fileServerUrl = setting?.fileServerUrl?.trim();
-      if (!fileServerUrl) {
-        throw new Error("请先设置文件上传服务器地址。在「设置」页配置 fileServerUrl（如 http://VPS_IP:3001）");
-      }
-
-      // 保存到临时文件（使用.txt扩展名以兼容上传服务器）
-      const tempDir = path.join(process.cwd(), "temp");
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      const tempFileName = `plan-data-${ctx.user.id}-${plan.id}-${Date.now()}.txt`;
-      const tempFilePath = path.join(tempDir, tempFileName);
-      fs.writeFileSync(tempFilePath, JSON.stringify(fileData, null, 2));
-
-      planDebugLog("aiGenerateSchedule 已保存临时文件", { tempFilePath });
-
-      // 上传到文件服务器
-      const uploadFormData = new FormData();
-      const fileBuffer = fs.readFileSync(tempFilePath);
-      const blob = new Blob([fileBuffer], { type: "application/json" });
-      uploadFormData.append("file", blob, tempFileName);
-
-      const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
-      planDebugLog("aiGenerateSchedule 开始上传文件", { uploadUrl, tempFileName });
-
-      let uploadRes;
-      try {
-        uploadRes = await fetch(uploadUrl, {
-          method: "POST",
-          body: uploadFormData,
-        });
-        planDebugLog("aiGenerateSchedule 文件上传请求完成", { status: uploadRes.status });
-      } catch (fetchErr) {
-        planDebugLog("aiGenerateSchedule 文件上传请求失败", { error: String(fetchErr) });
-        throw new Error(`文件上传请求失败: ${fetchErr}`);
-      }
-
-      // 删除临时文件
-      try {
-        fs.unlinkSync(tempFilePath);
-      } catch {}
-
-      if (!uploadRes.ok) {
-        const errText = await uploadRes.text().catch(() => "{}");
-        planDebugLog("aiGenerateSchedule 文件上传返回错误", { status: uploadRes.status, error: errText });
-        throw new Error(`文件上传失败: ${uploadRes.status} - ${errText}`);
-      }
-
-      let uploadData;
-      try {
-        uploadData = await uploadRes.json();
-      } catch (parseErr) {
-        const resText = await uploadRes.text().catch(() => "无法读取响应");
-        planDebugLog("aiGenerateSchedule 解析上传响应失败", { error: String(parseErr), response: resText });
-        throw new Error(`解析上传响应失败: ${parseErr}`);
-      }
-
-      const fileUrl = uploadData.url;
-      if (!fileUrl) {
-        planDebugLog("aiGenerateSchedule 上传响应缺少URL", { uploadData });
-        throw new Error("文件上传响应中缺少URL");
-      }
-
-      planDebugLog("aiGenerateSchedule 文件上传成功", { fileUrl, subjectsCount: subjectsData.length });
-
-      // 验证文件URL是否可访问
-      try {
-        const fileCheckRes = await fetch(fileUrl, { method: "HEAD" });
-        planDebugLog("aiGenerateSchedule 文件URL验证", {
-          fileUrl,
-          accessible: fileCheckRes.ok,
-          status: fileCheckRes.status,
-          contentType: fileCheckRes.headers.get("content-type"),
-          contentLength: fileCheckRes.headers.get("content-length"),
-        });
-      } catch (checkErr) {
-        planDebugLog("aiGenerateSchedule 文件URL验证失败(非致命)", { error: String(checkErr) });
-      }
+      planDebugLog("aiGenerateSchedule 数据已准备", { subjectsCount: subjectsData.length });
 
       // 第1层：生成轮次+月计划（使用文件URL）
       planDebugLog("aiGenerateSchedule 开始第1层：轮次/月计划", { totalMonths, reviewRounds });
       const stage1Start = Date.now();
 
       const roundMonthlyResult = await generateRoundAndMonthlyPlanFromFile(
-        fileUrl,
+        fileData,
         {
           dailyMinutes: plan.dailyMinutes,
           startDate,
@@ -915,7 +802,7 @@ export const planRouter = createRouter({
       const stage2Start = Date.now();
 
       const weeklyResult = await generateWeeklyPlanFromFile(
-        fileUrl,
+        fileData,
         {
           dailyMinutes: plan.dailyMinutes,
           totalWeeks,
@@ -979,12 +866,12 @@ export const planRouter = createRouter({
         config: { dailyMinutes: plan.dailyMinutes, startDate, totalMonths, reviewRounds, requirements: input.requirements || undefined }
       };
 
-      const { fileUrl, setting } = await uploadDataToFileServer(fileData, "plan-monthly", ctx.user.id, plan.id);
-      planDebugLog("aiGenerateMonthly 文件上传成功", { fileUrl });
+      const setting = await getUserAiSetting(ctx.user.id);
+      planDebugLog("aiGenerateMonthly 数据已准备", { subjectsCount: subjectsData.length });
 
       // 生成轮次+月计划
       const roundMonthlyResult = await generateRoundAndMonthlyPlanFromFile(
-        fileUrl,
+        fileData,
         { dailyMinutes: plan.dailyMinutes, startDate, totalMonths, reviewRounds, requirements: input.requirements || undefined },
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
@@ -1040,12 +927,12 @@ export const planRouter = createRouter({
         config: { dailyMinutes: plan.dailyMinutes, startDate, totalMonths, reviewRounds: plan.reviewRounds || 3, requirements: input.requirements || undefined }
       };
 
-      const { fileUrl, setting } = await uploadDataToFileServer(fileData, "plan-weekly", ctx.user.id, plan.id);
-      planDebugLog("aiGenerateWeekly 文件上传成功", { fileUrl });
+      const setting = await getUserAiSetting(ctx.user.id);
+      planDebugLog("aiGenerateWeekly 数据已准备", { subjectsCount: subjectsData.length });
 
       // 生成周计划
       const weeklyResult = await generateWeeklyPlanFromFile(
-        fileUrl,
+        fileData,
         { dailyMinutes: plan.dailyMinutes, totalWeeks, monthlyContext, requirements: input.requirements || undefined },
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
@@ -1131,12 +1018,12 @@ export const planRouter = createRouter({
         }
       };
 
-      const { fileUrl, setting } = await uploadDataToFileServer(fileData, "plan-monthly-weekly", ctx.user.id, plan.id);
-      planDebugLog("aiGenerateMonthlyWeekly 文件上传成功", { fileUrl });
+      const setting = await getUserAiSetting(ctx.user.id);
+      planDebugLog("aiGenerateMonthlyWeekly 数据已准备", { subjectsCount: subjectsData.length });
 
       // 调用AI生成该月的周计划
       const monthlyWeeklyResult = await generateMonthlyWeeklyPlanFromFile(
-        fileUrl,
+        fileData,
         {
           dailyMinutes: plan.dailyMinutes,
           monthNumber: input.monthNumber,
@@ -1229,10 +1116,10 @@ export const planRouter = createRouter({
         config: { dailyMinutes: plan.dailyMinutes, startDate, totalMonths, reviewRounds, requirements: input.requirements || undefined }
       };
 
-      const { fileUrl, setting } = await uploadDataToFileServer(fileData, "plan-monthly-regen", ctx.user.id, plan.id);
+      const setting = await getUserAiSetting(ctx.user.id);
 
       const roundMonthlyResult = await generateRoundAndMonthlyPlanFromFile(
-        fileUrl,
+        fileData,
         { dailyMinutes: plan.dailyMinutes, startDate, totalMonths, reviewRounds, requirements: input.requirements || undefined },
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
@@ -1281,10 +1168,10 @@ export const planRouter = createRouter({
         config: { dailyMinutes: plan.dailyMinutes, startDate, totalMonths, reviewRounds: plan.reviewRounds || 3, requirements: input.requirements || undefined }
       };
 
-      const { fileUrl, setting } = await uploadDataToFileServer(fileData, "plan-weekly-regen", ctx.user.id, plan.id);
+      const setting = await getUserAiSetting(ctx.user.id);
 
       const weeklyResult = await generateWeeklyPlanFromFile(
-        fileUrl,
+        fileData,
         { dailyMinutes: plan.dailyMinutes, totalWeeks, monthlyContext, requirements: input.requirements || undefined },
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
@@ -1394,47 +1281,10 @@ export const planRouter = createRouter({
         }
       };
 
-      const fileServerUrl = setting?.fileServerUrl?.trim();
-      if (!fileServerUrl) {
-        throw new Error("请先设置文件上传服务器地址");
-      }
-
-      const tempDir = path.join(process.cwd(), "temp");
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      const tempFileName = `weekly-daily-${ctx.user.id}-${plan.id}-${input.weekNumber}-${Date.now()}.txt`;
-      const tempFilePath = path.join(tempDir, tempFileName);
-      fs.writeFileSync(tempFilePath, JSON.stringify(fileData, null, 2));
-
-      const uploadFormData = new FormData();
-      const fileBuffer = fs.readFileSync(tempFilePath);
-      const blob = new Blob([fileBuffer], { type: "application/json" });
-      uploadFormData.append("file", blob, tempFileName);
-
-      const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
-      const uploadRes = await fetch(uploadUrl, {
-        method: "POST",
-        body: uploadFormData,
-      });
-
-      try {
-        fs.unlinkSync(tempFilePath);
-      } catch {}
-
-      if (!uploadRes.ok) {
-        throw new Error(`文件上传失败: ${uploadRes.status}`);
-      }
-
-      const uploadData = await uploadRes.json();
-      const fileUrl = uploadData.url;
-      if (!fileUrl) {
-        throw new Error("文件上传响应中缺少URL");
-      }
 
       // 调用AI生成该周日计划
       const weekDaysResult = await generateWeeklyDailyPlanFromFile(
-        fileUrl,
+        fileData,
         {
           dailyMinutes: plan.dailyMinutes,
           startDate,
@@ -1636,51 +1486,24 @@ export const planRouter = createRouter({
 
       // 如果题目不足10道，用AI生成补充
       if (savedQuestionIds.length < 10) {
-        const fileServerUrl = setting?.fileServerUrl?.trim();
-        if (fileServerUrl) {
-          const fileData = {
-            subjects: subjectsData,
-            week: weekData,
-            config: { weekNumber: input.weekNumber }
-          };
-
-          const tempDir = path.join(process.cwd(), "temp");
-          if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-          const tempFileName = `weekly-review-${ctx.user.id}-${plan.id}-${input.weekNumber}-${Date.now()}.txt`;
-          const tempFilePath = path.join(tempDir, tempFileName);
-          fs.writeFileSync(tempFilePath, JSON.stringify(fileData, null, 2));
-
-          const uploadFormData = new FormData();
-          const fileBuffer = fs.readFileSync(tempFilePath);
-          const blob = new Blob([fileBuffer], { type: "application/json" });
-          uploadFormData.append("file", blob, tempFileName);
-
-          const uploadUrl = `${fileServerUrl.replace(/\/$/, "")}/upload`;
-          const uploadRes = await fetch(uploadUrl, {
-            method: "POST",
-            body: uploadFormData,
-          });
-
-          try { fs.unlinkSync(tempFilePath); } catch {}
-
-          if (uploadRes.ok) {
-            const uploadData = await uploadRes.json();
-            const fileUrl = uploadData.url;
-
-            if (fileUrl) {
-              try {
-                const reviewResult = await generateWeeklyReviewQuestions(
-                  fileUrl,
-                  {
-                    weekNumber: input.weekNumber,
-                    knowledgeNodes: weekKnowledgeNodes,
-                    subjects: weekData.subjects || [],
-                  },
-                  10 - savedQuestionIds.length,
-                  setting?.aiApiKey || undefined,
-                  setting?.aiApiEndpoint || undefined,
-                  setting?.aiModel || undefined
-                );
+        const fileData = {
+          subjects: subjectsData,
+          week: weekData,
+          config: { weekNumber: input.weekNumber }
+        };
+        try {
+          const reviewResult = await generateWeeklyReviewQuestions(
+            fileData,
+            {
+              weekNumber: input.weekNumber,
+              knowledgeNodes: weekKnowledgeNodes,
+              subjects: weekData.subjects || [],
+            },
+            10 - savedQuestionIds.length,
+            setting?.aiApiKey || undefined,
+            setting?.aiApiEndpoint || undefined,
+            setting?.aiModel || undefined
+          );
 
                 knowledgeSummary = reviewResult.knowledgeSummary || knowledgeSummary;
 
@@ -1705,9 +1528,6 @@ export const planRouter = createRouter({
                 planDebugLog("aiGenerateWeeklyReview AI补充题目失败", { error: String(err) });
               }
             }
-          }
-        }
-      }
 
       // 创建或更新周回顾记录
       if (existingReview) {
@@ -1715,7 +1535,7 @@ export const planRouter = createRouter({
           .update(weeklyReviews)
           .set({
             questionIds: JSON.stringify(savedQuestionIds),
-            knowledgeSummary: reviewResult.knowledgeSummary,
+            knowledgeSummary: knowledgeSummary,
             totalQuestions: savedQuestionIds.length,
             status: "generated",
           })
@@ -1906,50 +1726,27 @@ export const planRouter = createRouter({
         aiFeedback: `本周测试正确率${totalScore}%，答对${correctCount}/${reviewQuestions.length}题。`,
       };
 
-      // 如果有文件服务器，调用AI评估
-      if (setting?.fileServerUrl && weekData) {
+      // 如果有周数据，调用AI评估
+      if (weekData) {
         try {
           const fileData = {
             week: weekData,
             answers: answerResults,
           };
 
-          const tempDir = path.join(process.cwd(), "temp");
-          const tempFileName = `weekly-eval-${ctx.user.id}-${plan.id}-${input.weekNumber}-${Date.now()}.txt`;
-          const tempFilePath = path.join(tempDir, tempFileName);
-          fs.writeFileSync(tempFilePath, JSON.stringify(fileData, null, 2));
+          const aiEval = await evaluateWeeklyReview(
+            fileData,
+            {
+              weekNumber: input.weekNumber,
+              knowledgeNodes: weekData.knowledgeNodes || [],
+            },
+            answerResults as any,
+            setting?.aiApiKey || undefined,
+            setting?.aiApiEndpoint || undefined,
+            setting?.aiModel || undefined
+          );
 
-          const uploadFormData = new FormData();
-          const fileBuffer = fs.readFileSync(tempFilePath);
-          const blob = new Blob([fileBuffer], { type: "application/json" });
-          uploadFormData.append("file", blob, tempFileName);
-
-          const uploadUrl = `${setting.fileServerUrl.replace(/\/$/, "")}/upload`;
-          const uploadRes = await fetch(uploadUrl, {
-            method: "POST",
-            body: uploadFormData,
-          });
-
-          try { fs.unlinkSync(tempFilePath); } catch {}
-
-          if (uploadRes.ok) {
-            const uploadData = await uploadRes.json();
-            const fileUrl = uploadData.url;
-
-            const aiEval = await evaluateWeeklyReview(
-              fileUrl,
-              {
-                weekNumber: input.weekNumber,
-                knowledgeNodes: weekData.knowledgeNodes || [],
-              },
-              answerResults as any,
-              setting?.aiApiKey || undefined,
-              setting?.aiApiEndpoint || undefined,
-              setting?.aiModel || undefined
-            );
-
-            evaluation = { ...evaluation, ...aiEval };
-          }
+          evaluation = { ...evaluation, ...aiEval };
         } catch (err) {
           planDebugLog("submitWeeklyReview AI评估失败", { error: String(err) });
         }
