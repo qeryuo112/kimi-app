@@ -80,8 +80,12 @@ export default function Plans() {
       }
       utils.plan.list.invalidate();
       utils.subject.list.invalidate();
-      setShowSelectSubjects(false);
-      setSelectedExistingIds(new Set());
+      // 延迟关闭弹窗，避免和 invalidate 导致的重新渲染冲突
+      // （浏览器翻译扩展可能已注入 DOM 节点）
+      setTimeout(() => {
+        setShowSelectSubjects(false);
+        setSelectedExistingIds(new Set());
+      }, 100);
       const added = data.results.filter((r) => r.success).length;
       if (added > 0) {
         toast.success(`成功添加 ${added} 个科目到计划`);
@@ -582,7 +586,7 @@ export default function Plans() {
 
                       {/* 从科目管理选择科目弹窗 */}
                       {selectedPlanId === plan.id && showSelectSubjects && (
-                        <div className="space-y-3">
+                        <div className="space-y-3" translate="no">
                           <div className="flex items-center justify-between">
                             <p className="text-sm font-medium">选择科目管理中的科目：</p>
                             <Button

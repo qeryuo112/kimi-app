@@ -46,29 +46,14 @@ AI_API_BASE_URL=https://api.openai.com
 
 ## 部署
 
-### 1. 前端（nginx 静态文件）
+详见 [`DEPLOY.md`](./DEPLOY.md)。
+
+快速更新（本地构建 → 上传 → 重启）：
 
 ```bash
-scp -r dist/public/* root@server:/var/www/kimiokc/dist/public/
-```
-
-### 2. 后端（PM2）
-
-```bash
-scp dist/boot.js root@server:/var/www/kimiokc/dist/boot.js
-pm2 restart kimiokc
-```
-
-### 3. 文件上传服务（upload-server，端口 3001）
-
-```bash
-pm2 start upload-server/index.js --name kimiokc-upload
-```
-
-### 4. 数据库同步
-
-```bash
-npx drizzle-kit push
+npm run build
+scp -i ~/.ssh/ab12.pem dist/boot.js root@47.103.72.72:/opt/kimiokc/dist/boot.js
+ssh -i ~/.ssh/ab12.pem root@47.103.72.72 "pm2 restart kimiokc"
 ```
 
 ---

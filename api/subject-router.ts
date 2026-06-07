@@ -150,6 +150,7 @@ export const subjectRouter = createRouter({
   analyze: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
+      console.log("[BACKEND analyze] mutation started, id=", input.id, "userId=", ctx.user.id);
       const db = getDb();
       const startTime = Date.now();
 
@@ -444,6 +445,7 @@ export const subjectRouter = createRouter({
           priority: knowledgeResult.subjectPriority,
         });
 
+        console.log("[BACKEND analyze] success, returning", { nodesCount: knowledgeResult.nodes.length, skillsCount: skillsResult.skills.length });
         return {
           success: true,
           nodesCount: knowledgeResult.nodes.length,
@@ -452,6 +454,7 @@ export const subjectRouter = createRouter({
           priority: knowledgeResult.subjectPriority,
         };
       } catch (error) {
+        console.error("[BACKEND analyze] ERROR:", error);
         const totalElapsed = Date.now() - startTime;
         debugLogError(`=== analyze mutation 失败 (耗时${totalElapsed}ms) ===`, error);
 

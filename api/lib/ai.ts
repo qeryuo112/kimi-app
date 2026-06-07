@@ -227,6 +227,12 @@ export async function chatWithAI(
 
   try {
     debugLog(`${label} 发起axios请求`, { url, bodyLength: bodyStr.length });
+    console.log("[BACKEND chatWithAI] POST", url, "bodyLength=", bodyStr.length, "messagesCount=", messages.length);
+    // 打印每条消息的content类型
+    messages.forEach((m, i) => {
+      const contentType = typeof m.content === "string" ? "string" : Array.isArray(m.content) ? `array[${m.content.length}]` : "unknown";
+      console.log(`[BACKEND chatWithAI] msg[${i}] role=${m.role} contentType=${contentType}`);
+    });
 
     const response = await axios.post(url, body, {
       headers: {
@@ -258,6 +264,7 @@ export async function chatWithAI(
     return content;
   } catch (err) {
     const elapsed = Date.now() - startTime;
+    console.error("[BACKEND chatWithAI] ERROR:", axios.isAxiosError(err) ? `${err.response?.status} ${JSON.stringify(err.response?.data)}` : String(err));
     if (axios.isAxiosError(err) && err.code === "ECONNABORTED") {
       debugLogError(`${label} 请求超时 (已耗时${elapsed}ms)`, err);
       throw new Error(`AI API请求超时（超过3600秒未响应）。请检查网络连接或稍后重试。`);
@@ -306,20 +313,20 @@ export async function analyzeContentForKnowledgeTree(
 
 【核心要求 - 必须严格遵守】
 1. **每个节点必须有唯一的 fullPath**。fullPath 是从根到当前节点的完整路径，格式："章标题 / 节标题 / 小节标题"
-2. **严格按照原文档的目录层级生成节点**，确保每个章节、每个小节都成为一个节点，绝不遗漏任何内容
+2. **严格按照原文档的目录层级生成节点，至少生成到"节"级别（如"第一节 概述"），如果原文档存在"一、二、三"等更细的小节，也必须生成，绝对不允许为了节省输出而省略任何层级**
 3. title 保持简洁（如"概述"），fullPath 包含完整路径用于唯一标识（如"第一章 绪论 / 第一节 概述"）
 4. parentTitle 必须引用父节点的 fullPath（根节点省略此字段）
 5. edges 中的 sourceTitle 和 targetTitle 也必须引用 fullPath
-6. description 控制在30字以内，节省输出空间
-7. edges 最多生成10条最核心的关联（前置知识优先），不要生成过多边
-8. 优先保证 nodes 的完整性和正确性，edges 可以精简
+6. description 控制在20字以内，极度节省输出空间，把空间留给 nodes
+7. **edges 最多只生成5条最核心的关联**（前置知识优先），绝不要生成过多边，把输出空间留给 nodes
+8. **nodes 的完整性是第一优先级**，必须覆盖原文档的所有章节和节，哪怕 edges 为空也要保证 nodes 完整
 9. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
 
-【fullPath 示例】
-- 根级："第一篇 工业药剂学的基础知识"
-- 章级："第一篇 工业药剂学的基础知识 / 第一章 绪论"
-- 节级："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述"
-- 小节："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述"
+【层级要求 - 绝不省略】
+- 第1层（篇）："第一篇 工业药剂学的基础知识"
+- 第2层（章）："第一篇 工业药剂学的基础知识 / 第一章 绪论"
+- 第3层（节）："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述" —— 必须生成
+- 第4层（小节）："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述" —— 原文有就必须生成
 
 请严格按照JSON格式返回，不要包含任何其他文本。格式如下：
 {
@@ -329,7 +336,7 @@ export async function analyzeContentForKnowledgeTree(
     {
       "title": "概述",
       "fullPath": "第一章 绪论 / 第一节 概述",
-      "description": "阐述工业药剂学定义、常用术语等",
+      "description": "工业药剂学定义与术语",
       "level": 3,
       "orderIndex": 0,
       "importance": 4,
@@ -416,24 +423,25 @@ export async function analyzeFilesForKnowledgeTree(
   subjectDifficulty: number;
   subjectPriority: number;
 }> {
+  console.log("[BACKEND analyzeFilesForKnowledgeTree] START, urls=", urls, "modelName=", modelName);
   const systemPrompt = `你是一个专业的教育内容分析AI。请仔细阅读用户提供的文件（教材、课件、参考资料等），严格按照文档的目录结构提取知识树。
 
 【核心要求 - 必须严格遵守】
 1. **每个节点必须有唯一的 fullPath**。fullPath 是从根到当前节点的完整路径，格式："章标题 / 节标题 / 小节标题"
-2. **严格按照原文档的目录层级生成节点**，确保每个章节、每个小节都成为一个节点，绝不遗漏任何内容
+2. **严格按照原文档的目录层级生成节点，至少生成到"节"级别（如"第一节 概述"），如果原文档存在"一、二、三"等更细的小节，也必须生成，绝对不允许为了节省输出而省略任何层级**
 3. title 保持简洁（如"概述"），fullPath 包含完整路径用于唯一标识（如"第一章 绪论 / 第一节 概述"）
 4. parentTitle 必须引用父节点的 fullPath（根节点省略此字段）
 5. edges 中的 sourceTitle 和 targetTitle 也必须引用 fullPath
-6. description 控制在30字以内，节省输出空间
-7. edges 最多生成10条最核心的关联（前置知识优先），不要生成过多边
-8. 优先保证 nodes 的完整性和正确性，edges 可以精简
+6. description 控制在20字以内，极度节省输出空间，把空间留给 nodes
+7. **edges 最多只生成5条最核心的关联**（前置知识优先），绝不要生成过多边，把输出空间留给 nodes
+8. **nodes 的完整性是第一优先级**，必须覆盖原文档的所有章节和节，哪怕 edges 为空也要保证 nodes 完整
 9. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
 
-【fullPath 示例】
-- 根级："第一篇 工业药剂学的基础知识"
-- 章级："第一篇 工业药剂学的基础知识 / 第一章 绪论"
-- 节级："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述"
-- 小节："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述"
+【层级要求 - 绝不省略】
+- 第1层（篇）："第一篇 工业药剂学的基础知识"
+- 第2层（章）："第一篇 工业药剂学的基础知识 / 第一章 绪论"
+- 第3层（节）："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述" —— 必须生成
+- 第4层（小节）："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述" —— 原文有就必须生成
 
 请严格按照JSON格式返回，不要包含任何其他文本。格式如下：
 {
@@ -443,7 +451,7 @@ export async function analyzeFilesForKnowledgeTree(
     {
       "title": "概述",
       "fullPath": "第一章 绪论 / 第一节 概述",
-      "description": "阐述工业药剂学定义、常用术语等",
+      "description": "工业药剂学定义与术语",
       "level": 3,
       "orderIndex": 0,
       "importance": 4,
@@ -464,7 +472,9 @@ export async function analyzeFilesForKnowledgeTree(
 }`;
 
   const userPrompt = `请从以上文件中提取知识树结构，科目名称：${title}`;
+  console.log("[BACKEND analyzeFilesForKnowledgeTree] calling processUrlsToContentBlocks, modelName=", modelName);
   const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
+  console.log("[BACKEND analyzeFilesForKnowledgeTree] contentBlocks count=", contentBlocks.length);
 
   const messages: KimiMessage[] = [
     { role: "system", content: systemPrompt },
@@ -474,12 +484,15 @@ export async function analyzeFilesForKnowledgeTree(
     },
   ];
 
+  console.log("[BACKEND analyzeFilesForKnowledgeTree] calling chatWithAI...");
   const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
+  console.log("[BACKEND analyzeFilesForKnowledgeTree] chatWithAI returned, result length=", result.length);
 
   try {
     const jsonStr = extractJsonFromResponse(result);
     debugLog("analyzeFilesForKnowledgeTree 提取JSON", { jsonStrLength: jsonStr.length });
     const parsed = JSON.parse(jsonStr);
+    console.log("[BACKEND analyzeFilesForKnowledgeTree] parsed, nodes=", parsed.nodes?.length, "edges=", parsed.edges?.length);
     return {
       nodes: parsed.nodes || [],
       edges: parsed.edges || [],
@@ -1103,7 +1116,7 @@ export async function generateQuestionsFromFileUrls(
     : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
 
   const chemHint = requireChemicalStructure
-    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 和 options 中用 \\chem{SMILES} 格式嵌入化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）。选项的 text 字段中必须包含 \\chem{SMILES}，不能只写文字描述。\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
+    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 或 options 中嵌入 \\chem{SMILES} 格式（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}），\\chem{} 会被渲染为结构图。结构式放题干、放选项、或两者都有，完全由你根据题目考察意图自行决定。\n9. 【返回前自我检查】生成完所有题目后，请自行 review 一遍，检查题目逻辑是否合理、是否存在自相矛盾或明显泄露答案的设计瑕疵。由你自己判断是否需要修正，确认无误后再返回最终结果。\n10. 化学结构题需额外返回 smiles 和 inchi 字段`
     : "";
 
   const systemPrompt = `你是一个专业的出题AI。请仔细阅读用户提供的文件内容，然后根据内容生成高质量的练习题。
@@ -1193,7 +1206,7 @@ export async function generateQuestions(
     : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
 
   const chemHint = requireChemicalStructure
-    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 和 options 中用 \\chem{SMILES} 格式嵌入化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）。选项的 text 字段中必须包含 \\chem{SMILES}，不能只写文字描述。\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
+    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 或 options 中嵌入 \\chem{SMILES} 格式（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}），\\chem{} 会被渲染为结构图。结构式放题干、放选项、或两者都有，完全由你根据题目考察意图自行决定。\n9. 【返回前自我检查】生成完所有题目后，请自行 review 一遍，检查题目逻辑是否合理、是否存在自相矛盾或明显泄露答案的设计瑕疵。由你自己判断是否需要修正，确认无误后再返回最终结果。\n10. 化学结构题需额外返回 smiles 和 inchi 字段`
     : "";
 
   const systemPrompt = `你是一个专业的出题AI。请根据知识点内容生成高质量的练习题。
@@ -2706,12 +2719,13 @@ export async function generateWeeklyDailyPlanFromFile(
 
   const systemPrompt = `你是一个科学的学习计划生成AI。请根据文件中的科目和知识树数据，以及周计划概览，生成${config.weekNumber}周的7天详细日计划。
 
-【核心规则】
-1. 每天必须安排所有科目，每个科目作为独立条目
-2. 同一天内不同科目使用相同的day和date
-3. 周日设为回顾日（review=true），复习本周所学
-4. 确保day序号从${startDay}到${endDay}
-5. 覆盖周计划中的所有知识点
+【核心规则 - 必须严格遵守】
+1. **只安排本周涉及的科目**。如果文件中提供了10个科目，但本周计划只涉及其中3个，那么只生成这3个科目的日计划，绝对不要把其他周的科目塞进来
+2. 每天必须安排本周的所有科目，每个科目作为独立条目
+3. 同一天内不同科目使用相同的day和date
+4. 周日设为回顾日（review=true），复习本周所学
+5. 确保day序号从${startDay}到${endDay}
+6. 覆盖周计划中的所有知识点
 
 请返回JSON格式：
 {

@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
+import { useTheme } from "next-themes";
+import { trpc } from "@/providers/trpc";
 import type { LucideIcon } from "lucide-react";
 
 interface NavItem {
@@ -44,13 +46,24 @@ const navItems: NavItem[] = [
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { setTheme } = useTheme();
   const { user, isLoading, isAuthenticated, logout } = useAuth();
-  console.log("[Layout] render state:", { isLoading, isAuthenticated, path: location.pathname, userId: user?.id });
+
+  // 同步用户主题设置
+  const { data: userSettings } = trpc.settings.get.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
 
   useEffect(() => {
-    console.log("[Layout] auth effect:", { isLoading, isAuthenticated });
+    console.log("[Theme-DEBUG] Layout userSettings 变化:", { theme: userSettings?.theme });
+    if (userSettings?.theme) {
+      setTheme(userSettings.theme);
+      console.log("[Theme-DEBUG] Layout setTheme 已调用:", userSettings.theme);
+    }
+  }, [userSettings?.theme, setTheme]);
+
+  useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      console.log("[Layout] redirecting to /login");
       navigate("/login", { replace: true });
     }
   }, [isLoading, isAuthenticated, navigate]);

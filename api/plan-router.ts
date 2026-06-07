@@ -1260,11 +1260,15 @@ export const planRouter = createRouter({
         .where(and(eq(subjects.userId, ctx.user.id)))
         .then((rows) => rows.filter((s) => subjectIds.includes(s.id)));
 
-      const subjectsData = planSubs.map((s) => ({
-        title: s.title,
-        priority: s.priority,
-        difficulty: s.difficulty,
-      }));
+      // 只保留本周涉及的科目，避免 AI 把全部科目塞进一周
+      const weekSubjectTitles = new Set(weekData.subjects || []);
+      const subjectsData = planSubs
+        .filter((s) => weekSubjectTitles.has(s.title))
+        .map((s) => ({
+          title: s.title,
+          priority: s.priority,
+          difficulty: s.difficulty,
+        }));
 
       // 构建周上下文
       const weeklyContext = `第${weekData.week}周(第${weekData.month}月)：${weekData.focus}；知识点：${weekData.knowledgeNodes?.join("、")}`;

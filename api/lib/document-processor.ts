@@ -97,7 +97,7 @@ export async function convertPdfToImages(
     const scriptPath = path.join(process.cwd(), "scripts", "pdf-to-images.py");
     const { stdout } = await new Promise<{ stdout: string; stderr: string }>(
       (resolve, reject) => {
-        const pythonPath = process.platform === "win32" ? "C:/Python314/python.exe" : "/c/Python314/python";
+        const pythonPath = process.platform === "win32" ? "C:/Python314/python.exe" : "/usr/bin/python3";
         const proc = spawn(pythonPath, [
           scriptPath,
           inputPath,
@@ -158,7 +158,7 @@ export async function extractPptxText(
     const scriptPath = path.join(process.cwd(), "scripts", "pptx-to-text.py");
     const { stdout } = await new Promise<{ stdout: string; stderr: string }>(
       (resolve, reject) => {
-        const pythonPath = process.platform === "win32" ? "C:/Python314/python.exe" : "/c/Python314/python";
+        const pythonPath = process.platform === "win32" ? "C:/Python314/python.exe" : "/usr/bin/python3";
         const proc = spawn(pythonPath, [scriptPath, inputPath]);
         let stdout = "";
         let stderr = "";
@@ -267,9 +267,12 @@ export async function processUrlsToContentBlocks(
     // ---- 图片 ----
     const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
     if (imageExts.includes(ext)) {
+      console.log("[DOC-PROCESSOR] Image file, useKimi=", useKimi, "url=", url.slice(0, 50));
       if (useKimi) {
         try {
+          console.log("[DOC-PROCESSOR] Downloading image for Kimi upload...");
           const imageBuffer = await downloadFileToBuffer(url);
+          console.log("[DOC-PROCESSOR] Downloaded, size=", imageBuffer.length, "uploading to Kimi...");
           const fileObj = await uploadFileToKimi(
             imageBuffer,
             getUrlFileName(url),
@@ -277,6 +280,7 @@ export async function processUrlsToContentBlocks(
             options!.apiKey!,
             options?.apiBaseUrl
           );
+          console.log("[DOC-PROCESSOR] Kimi image upload ok, fileId=", fileObj.id);
           blocks.push({ type: "image_url", image_url: { url: `ms://${fileObj.id}` } });
         } catch (err) {
           debugLogError(`Kimi 图片上传失败: ${url}`, err);
@@ -326,15 +330,18 @@ export async function processUrlsToContentBlocks(
     // ---- PDF → 图片 ----
     if (ext === "pdf") {
       try {
+        console.log("[DOC-PROCESSOR] PDF processing start, url=", url.slice(0, 50), "useKimi=", useKimi);
         const pdfBuffer = await downloadFileToBuffer(url);
         const pages = await convertPdfToImages(pdfBuffer, 150);
         debugLog("PDF 转图片完成", { pageCount: pages.length, useKimi });
 
         if (useKimi) {
           // Kimi 平台：上传 PNG 到 Kimi 文件接口，通过 ms:// 引用
+          console.log("[DOC-PROCESSOR] Uploading", pages.length, "pages to Kimi...");
           const uploadResults = await Promise.all(
             pages.map(async (page) => {
               const filename = `page-${page.pageNumber}.png`;
+              console.log("[DOC-PROCESSOR] Uploading page", page.pageNumber, "to Kimi...");
               const fileObj = await uploadFileToKimi(
                 page.pngBuffer,
                 filename,
@@ -342,9 +349,11 @@ export async function processUrlsToContentBlocks(
                 options!.apiKey!,
                 options?.apiBaseUrl
               );
+              console.log("[DOC-PROCESSOR] Kimi upload ok, fileId=", fileObj.id);
               return { pageNumber: page.pageNumber, fileId: fileObj.id };
             })
           );
+          console.log("[DOC-PROCESSOR] All pages uploaded to Kimi, count=", uploadResults.length);
 
           blocks.push({ type: "text", text: `[PDF 文档: ${getUrlFileName(url)}，共 ${pages.length} 页]` });
           for (const r of uploadResults) {
