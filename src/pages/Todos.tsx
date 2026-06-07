@@ -416,6 +416,11 @@ export default function Todos() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{todo.subject}</span>
                           {statusBadge(todo.status)}
+                          {todo.status === "pending" && todo.date !== new Date().toISOString().split("T")[0] && (
+                            <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/20">
+                              已延期
+                            </Badge>
+                          )}
                         </div>
                         <Badge variant="outline">{todo.estimatedMinutes}分钟</Badge>
                       </div>

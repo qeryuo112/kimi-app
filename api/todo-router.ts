@@ -14,7 +14,7 @@ import {
   questions,
   wrongAnswers,
 } from "@db/schema";
-import { eq, and, lte, desc, inArray } from "drizzle-orm";
+import { eq, and, or, lte, lt, desc, inArray } from "drizzle-orm";
 import { generateTodoTestQuestions, generateTodoTestFromFiles, evaluateTodoTestAnswers } from "./lib/ai";
 
 // 根据掌握度计算下一次复习间隔（间隔重复算法）
@@ -175,6 +175,7 @@ export const todoRouter = createRouter({
     }),
 
   // 获取今日任务（所有计划汇总）
+  // 包含今天的所有任务 + 历史日期未完成的 pending 任务（自动顺延）
   getToday: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
     const today = new Date().toISOString().split("T")[0];
@@ -182,7 +183,15 @@ export const todoRouter = createRouter({
     const todos = await db
       .select()
       .from(dailyTodos)
-      .where(and(eq(dailyTodos.userId, ctx.user.id), eq(dailyTodos.date, today)))
+      .where(
+        and(
+          eq(dailyTodos.userId, ctx.user.id),
+          or(
+            eq(dailyTodos.date, today),
+            and(lt(dailyTodos.date, today), eq(dailyTodos.status, "pending"))
+          )
+        )
+      )
       .orderBy(dailyTodos.status);
 
     const completedCount = todos.filter((t) => t.status === "completed").length;
