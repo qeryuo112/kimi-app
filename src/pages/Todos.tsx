@@ -54,6 +54,7 @@ export default function Todos() {
   const [activeTodoId, setActiveTodoId] = useState<number | null>(null);
   const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
   const [testAnswers, setTestAnswers] = useState<Record<string, string>>({});
+  const [testAnswerImages, setTestAnswerImages] = useState<Record<string, string[]>>({});
   const [actualMinutes, setActualMinutes] = useState(30);
   const [testStep, setTestStep] = useState<"loading" | "testing" | "result" | "select-source">("select-source");
   const [testResult, setTestResult] = useState<any>(null);
@@ -69,6 +70,7 @@ export default function Todos() {
   const [activeReviewId, setActiveReviewId] = useState<number | null>(null);
   const [reviewTestQuestions, setReviewTestQuestions] = useState<TestQuestion[]>([]);
   const [reviewTestAnswers, setReviewTestAnswers] = useState<Record<string, string>>({});
+  const [reviewTestAnswerImages, setReviewTestAnswerImages] = useState<Record<string, string[]>>({});
   const [reviewTestStep, setReviewTestStep] = useState<"loading" | "testing" | "result" | "select-source">("select-source");
   const [reviewTestResult, setReviewTestResult] = useState<any>(null);
   const [reviewTestQuestionType, setReviewTestQuestionType] = useState<"single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed">("mixed");
@@ -128,6 +130,7 @@ export default function Todos() {
     onSuccess: (data) => {
       setTestQuestions(data.questions);
       setTestAnswers({});
+      setTestAnswerImages({});
       setTestStep("testing");
       toast.success(data.source === "database" ? `从题库匹配 ${data.questions.length} 道题目` : `AI生成 ${data.questions.length} 道题目`);
     },
@@ -168,6 +171,7 @@ export default function Todos() {
     onSuccess: (data) => {
       setReviewTestQuestions(data.questions);
       setReviewTestAnswers({});
+      setReviewTestAnswerImages({});
       setReviewTestStep("testing");
       toast.success(data.source === "database" ? `从题库匹配 ${data.questions.length} 道题目` : `AI生成 ${data.questions.length} 道题目`);
     },
@@ -271,6 +275,7 @@ export default function Todos() {
         const parsed = JSON.parse(cached);
         setTestQuestions(parsed.questions);
         setTestAnswers(parsed.answers || {});
+        setTestAnswerImages({});
         setActiveTodoId(parsed.todoId);
         setTestStep("testing");
         setTestOpen(true);
@@ -319,9 +324,56 @@ export default function Todos() {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const [uploadingAnswerImageId, setUploadingAnswerImageId] = useState<string | null>(null);
+
+  const handleAnswerImageUpload = async (
+    questionId: string,
+    file: File,
+    setImages: React.Dispatch<React.SetStateAction<Record<string, string[]>>>
+  ) => {
+    setUploadingAnswerImageId(questionId);
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch("/upload", { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(`上传失败: ${err.error || res.statusText}`);
+        return;
+      }
+      const data = await res.json();
+      if (data.url) {
+        setImages((prev) => ({
+          ...prev,
+          [questionId]: [...(prev[questionId] || []), data.url],
+        }));
+        toast.success("图片上传成功");
+      }
+    } catch (err: any) {
+      toast.error(`上传失败: ${err.message}`);
+    } finally {
+      setUploadingAnswerImageId(null);
+    }
+  };
+
+  const removeAnswerImage = (
+    questionId: string,
+    index: number,
+    setImages: React.Dispatch<React.SetStateAction<Record<string, string[]>>>
+  ) => {
+    setImages((prev) => {
+      const list = prev[questionId] || [];
+      return { ...prev, [questionId]: list.filter((_, i) => i !== index) };
+    });
+  };
+
   const handleSubmitTest = () => {
     if (!activeTodoId) return;
-    const unanswered = testQuestions.filter((q) => !testAnswers[q.id]);
+    const unanswered = testQuestions.filter((q) => {
+      const hasText = !!testAnswers[q.id]?.trim();
+      const hasImages = (testAnswerImages[q.id] || []).length > 0;
+      return !hasText && !hasImages;
+    });
     if (unanswered.length > 0) {
       if (!confirm(`还有 ${unanswered.length} 道题未作答，确定提交吗？`)) return;
     }
@@ -340,6 +392,7 @@ export default function Todos() {
       answers: testQuestions.map((q) => ({
         questionId: q.id,
         userAnswer: testAnswers[q.id] || "",
+        imageUrls: testAnswerImages[q.id] || undefined,
       })),
     });
   };
@@ -898,11 +951,42 @@ export default function Todos() {
                         })}
                       </div>
                     ) : (
-                      <Input
-                        placeholder="请输入你的答案"
-                        value={testAnswers[q.id] || ""}
-                        onChange={(e) => setTestAnswers({ ...testAnswers, [q.id]: e.target.value })}
-                      />
+                      <div className="space-y-2">
+                        <Input
+                          placeholder="请输入你的答案"
+                          value={testAnswers[q.id] || ""}
+                          onChange={(e) => setTestAnswers({ ...testAnswers, [q.id]: e.target.value })}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {(testAnswerImages[q.id] || []).map((url, i) => (
+                            <div key={i} className="relative group">
+                              <img src={url} alt="" className="h-16 w-16 object-cover rounded border" />
+                              <button
+                                onClick={() => removeAnswerImage(q.id, i, setTestAnswerImages)}
+                                className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                          <label className="cursor-pointer">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleAnswerImageUpload(q.id, file, setTestAnswerImages);
+                                e.target.value = "";
+                              }}
+                            />
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs ${uploadingAnswerImageId === q.id ? "opacity-50" : "hover:bg-secondary"}`}>
+                              {uploadingAnswerImageId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                              上传图片
+                            </span>
+                          </label>
+                        </div>
+                      </div>
                     )}
                     <p className="text-[10px] text-muted-foreground mt-1.5">知识点：{q.knowledgePoint}</p>
                   </div>
@@ -979,8 +1063,15 @@ export default function Todos() {
                         <div className="font-medium"><span>{idx + 1}.</span> <MathContent content={q.content} /></div>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        你的答案：{userAns || "未作答"} · 正确答案：{q.correctAnswer}
+                        你的答案：{userAns || "未作答"} · 正确答案：<MathContent content={q.correctAnswer} />
                       </p>
+                      {(testAnswerImages[q.id] || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {testAnswerImages[q.id].map((url, i) => (
+                            <img key={i} src={url} alt="" className="h-12 w-12 object-cover rounded border" />
+                          ))}
+                        </div>
+                      )}
                       <MathContent content={q.explanation} className="text-xs text-primary mt-0.5" />
                     </div>
                   );
@@ -1152,12 +1243,43 @@ export default function Todos() {
                         })}
                       </div>
                     ) : (
-                      <textarea
-                        className="w-full p-2 rounded-lg border border-border bg-background text-sm min-h-[80px]"
-                        placeholder="请输入答案..."
-                        value={reviewTestAnswers[q.id] || ""}
-                        onChange={(e) => setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: e.target.value })}
-                      />
+                      <div className="space-y-2">
+                        <textarea
+                          className="w-full p-2 rounded-lg border border-border bg-background text-sm min-h-[80px]"
+                          placeholder="请输入答案..."
+                          value={reviewTestAnswers[q.id] || ""}
+                          onChange={(e) => setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: e.target.value })}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {(reviewTestAnswerImages[q.id] || []).map((url, i) => (
+                            <div key={i} className="relative group">
+                              <img src={url} alt="" className="h-16 w-16 object-cover rounded border" />
+                              <button
+                                onClick={() => removeAnswerImage(q.id, i, setReviewTestAnswerImages)}
+                                className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                          <label className="cursor-pointer">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleAnswerImageUpload(q.id, file, setReviewTestAnswerImages);
+                                e.target.value = "";
+                              }}
+                            />
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs ${uploadingAnswerImageId === q.id ? "opacity-50" : "hover:bg-secondary"}`}>
+                              {uploadingAnswerImageId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                              上传图片
+                            </span>
+                          </label>
+                        </div>
+                      </div>
                     )}
                   </div>
                 );
@@ -1172,14 +1294,19 @@ export default function Todos() {
                       submitReviewTest.mutate({
                         reviewId: activeReviewId,
                         questions: reviewTestQuestions,
-                        answers: Object.entries(reviewTestAnswers).map(([questionId, userAnswer]) => ({
-                          questionId,
-                          userAnswer,
+                        answers: reviewTestQuestions.map((q) => ({
+                          questionId: q.id,
+                          userAnswer: reviewTestAnswers[q.id] || "",
+                          imageUrls: reviewTestAnswerImages[q.id] || undefined,
                         })),
                       });
                     }
                   }}
-                  disabled={reviewTestQuestions.some(q => !reviewTestAnswers[q.id])}
+                  disabled={reviewTestQuestions.some((q) => {
+                    const hasText = !!reviewTestAnswers[q.id]?.trim();
+                    const hasImages = (reviewTestAnswerImages[q.id] || []).length > 0;
+                    return !hasText && !hasImages;
+                  })}
                 >
                   提交答案
                 </Button>
@@ -1311,8 +1438,15 @@ export default function Todos() {
                       <div className="flex-1">
                         <div className="font-medium"><span>{idx + 1}.</span> <MathContent content={q.content} /></div>
                         <p className="text-xs text-muted-foreground mt-1">
-                          你的答案：{q.userAnswer || "未作答"} · 正确答案：{q.correctAnswer}
+                          你的答案：{q.userAnswer || "未作答"} · 正确答案：<MathContent content={q.correctAnswer} />
                         </p>
+                        {q.imageUrls && q.imageUrls.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {q.imageUrls.map((url: string, i: number) => (
+                              <img key={i} src={url} alt="" className="h-12 w-12 object-cover rounded border" />
+                            ))}
+                          </div>
+                        )}
                         {q.explanation && (
                           <MathContent content={q.explanation} className="text-xs text-primary mt-1" />
                         )}

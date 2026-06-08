@@ -441,6 +441,11 @@ export const todoRouter = createRouter({
       // 将AI生成的题目保存到题库
       const savedQuestionIds: number[] = [];
       for (const q of result.questions) {
+        console.log("[todo.generateTest] 准备插入题目", {
+          content: q.content?.slice(0, 50),
+          hasBackslashChem: q.content?.includes("\\chem"),
+          hasBelChem: q.content?.includes("\x07chem"),
+        });
         const [{ id }] = await db
           .insert(questions)
           .values({
@@ -517,6 +522,11 @@ export const todoRouter = createRouter({
       // 将AI生成的题目保存到题库
       const savedQuestionIds: number[] = [];
       for (const q of result.questions) {
+        console.log("[todo.generateTestFromFiles] 准备插入题目", {
+          content: q.content?.slice(0, 50),
+          hasBackslashChem: q.content?.includes("\\chem"),
+          hasBelChem: q.content?.includes("\x07chem"),
+        });
         const [{ id }] = await db
           .insert(questions)
           .values({
@@ -559,6 +569,7 @@ export const todoRouter = createRouter({
           z.object({
             questionId: z.string(),
             userAnswer: z.string(),
+            imageUrls: z.array(z.string()).optional(),
           })
         ),
       })
@@ -1335,6 +1346,11 @@ export const todoRouter = createRouter({
       const finalNodeId = nodeId;
 
       for (const q of result.questions) {
+        console.log("[todo.generateReviewTest] 准备插入题目", {
+          content: q.content?.slice(0, 50),
+          hasBackslashChem: q.content?.includes("\\chem"),
+          hasBelChem: q.content?.includes("\x07chem"),
+        });
         const [{ id }] = await db
           .insert(questions)
           .values({
@@ -1390,6 +1406,7 @@ export const todoRouter = createRouter({
           z.object({
             questionId: z.string(),
             userAnswer: z.string(),
+            imageUrls: z.array(z.string()).optional(),
           })
         ),
       })
@@ -1499,6 +1516,7 @@ export const todoRouter = createRouter({
           return {
             ...q,
             userAnswer: ans?.userAnswer || "",
+            imageUrls: ans?.imageUrls || [],
             isCorrect,
           };
         }),

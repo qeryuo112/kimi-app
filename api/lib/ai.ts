@@ -253,6 +253,13 @@ export async function chatWithAI(
     const previewContent = content.slice(0, 500);
     const hasMore = content.length > 500 ? `... (总共${content.length}字符)` : "";
     const reasoning = data.choices?.[0]?.message?.reasoning_content;
+    const hasChem = content.includes("\\chem");
+    const hasBel = content.includes("\x07chem");
+    console.log(`[BACKEND chatWithAI] chem-check label=${label} hasBackslashChem=${hasChem} hasBelChem=${hasBel}`);
+    if (hasChem || hasBel) {
+      const idx = content.indexOf(hasChem ? "\\chem" : "\x07chem");
+      console.log(`[BACKEND chatWithAI] chem-snippet label=${label} snippet=${JSON.stringify(content.slice(Math.max(0, idx-20), idx+50))}`);
+    }
     debugLog(`${label} 请求成功`, {
       elapsedMs: elapsed,
       responseLength: content.length,
@@ -1139,6 +1146,7 @@ export async function generateQuestionsFromFileUrls(
 6. mixed模式下，必须混合至少2种不同题型
 7. **分析文件内容所属的学科，以及每道题目考察的具体知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**。注意：这两个字段必须是你从实际输入内容中明确识别出的真实学科和知识点名称，不要编造、泛化或自行分类。
 8. **【重要】选项内容绝对不能包含答案提示或正确性标识。例如：不要写"（正确答案）"、"（正确）"、"（错误）"等任何暗示对错的文字；不要写"（黄酮...）"这种选项特有的解释性文字**${chemHint}
+9. **【最高优先级】如果用户提供了【用户特殊要求】，这些要求具有最高优先级，必须严格遵守，即使与上述默认规则冲突也应以用户要求为准。**
 
 请返回JSON格式：
 {
@@ -1171,7 +1179,10 @@ export async function generateQuestionsFromFileUrls(
   const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
+    console.log("[BACKEND generateQuestionsFromFileUrls] before JSON.parse", { resultSlice: result.slice(0, 500), hasBackslashChem: result.includes("\\chem"), hasBelChem: result.includes("\x07chem") });
     const parsed = JSON.parse(result);
+    const firstQ = parsed.questions?.[0];
+    console.log("[BACKEND generateQuestionsFromFileUrls] after JSON.parse", { firstQContentSlice: firstQ?.content?.slice(0, 100), hasBackslashChem: firstQ?.content?.includes("\\chem"), hasBelChem: firstQ?.content?.includes("\x07chem") });
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的题目数据格式不正确");
@@ -1231,6 +1242,7 @@ export async function generateQuestions(
 6. mixed模式下，必须混合至少2种不同题型
 7. **分析题目所属学科和具体考察的知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**。注意：这两个字段必须是你从实际输入内容中明确识别出的真实学科和知识点名称，不要编造、泛化或自行分类。
 8. **【重要】选项内容绝对不能包含答案提示或正确性标识。例如：不要写"（正确答案）"、"（正确）"、"（错误）"等任何暗示对错的文字；不要写"（黄酮...）"这种选项特有的解释性文字**${chemHint}
+9. **【最高优先级】如果用户提供了【用户特殊要求】，这些要求具有最高优先级，必须严格遵守，即使与上述默认规则冲突也应以用户要求为准。**
 
 请返回JSON格式：
 {
@@ -1255,7 +1267,7 @@ export async function generateQuestions(
 内容：
 ${knowledgeContent.slice(0, 6000)}
 
-${difficulty === 0 ? "难度要求：混合难度，请生成覆盖简单到困难不同难度的题目" : `难度要求：${difficulty}/5`}${customInstructions ? `\n\n【用户特殊要求】${customInstructions}` : ""}`;
+${difficulty === 0 ? "难度要求：混合难度，请生成覆盖简单到困难不同难度的题目" : `难度要求：${difficulty}/5`}${customInstructions ? `\n\n【用户特殊要求 - 最高优先级】${customInstructions}` : ""}`;
 
   const result = await chatWithAI(
     [
@@ -1269,7 +1281,10 @@ ${difficulty === 0 ? "难度要求：混合难度，请生成覆盖简单到困�
   );
 
   try {
+    console.log("[BACKEND generateQuestions] before JSON.parse", { resultSlice: result.slice(0, 500), hasBackslashChem: result.includes("\\chem"), hasBelChem: result.includes("\x07chem") });
     const parsed = JSON.parse(result);
+    const firstQ = parsed.questions?.[0];
+    console.log("[BACKEND generateQuestions] after JSON.parse", { firstQContentSlice: firstQ?.content?.slice(0, 100), hasBackslashChem: firstQ?.content?.includes("\\chem"), hasBelChem: firstQ?.content?.includes("\x07chem") });
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的题目数据格式不正确");
@@ -1282,6 +1297,7 @@ export async function evaluateAnswer(
   correctAnswer: string,
   userAnswer: string,
   questionType: string,
+  imageUrls?: string[],
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
@@ -1301,11 +1317,15 @@ export async function evaluateAnswer(
   "mastery": 75
 }`;
 
+  const imagePart = imageUrls && imageUrls.length > 0
+    ? `\n用户上传的图片：${imageUrls.join("、")}`
+    : "";
+
   const userPrompt = `题目：${question}
 
 正确答案：${correctAnswer}
 
-用户答案：${userAnswer}
+用户答案：${userAnswer}${imagePart}
 
 题目类型：${questionType}
 
@@ -1468,7 +1488,10 @@ ${content.slice(0, 8000)}
   );
 
   try {
+    console.log("[BACKEND generateQuestionsFromFileUrls] before JSON.parse", { resultSlice: result.slice(0, 500), hasBackslashChem: result.includes("\\chem"), hasBelChem: result.includes("\x07chem") });
     const parsed = JSON.parse(result);
+    const firstQ = parsed.questions?.[0];
+    console.log("[BACKEND generateQuestionsFromFileUrls] after JSON.parse", { firstQContentSlice: firstQ?.content?.slice(0, 100), hasBackslashChem: firstQ?.content?.includes("\\chem"), hasBelChem: firstQ?.content?.includes("\x07chem") });
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的测试题数据格式不正确");
@@ -1628,7 +1651,10 @@ ${knowledgeNodes.map((n, i) => `${i + 1}. ${n}`).join("\n")}
   );
 
   try {
+    console.log("[BACKEND generateTodoTestQuestions] before JSON.parse", { resultSlice: result.slice(0, 500), hasBackslashChem: result.includes("\\chem"), hasBelChem: result.includes("\x07chem") });
     const parsed = JSON.parse(result);
+    const firstQ = parsed.questions?.[0];
+    console.log("[BACKEND generateTodoTestQuestions] after JSON.parse", { firstQContentSlice: firstQ?.content?.slice(0, 100), hasBackslashChem: firstQ?.content?.includes("\\chem"), hasBelChem: firstQ?.content?.includes("\x07chem") });
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的测试题格式不正确");
@@ -1640,7 +1666,7 @@ export async function evaluateTodoTestAnswers(
   subject: string,
   knowledgeNodes: string[],
   questions: Array<{ id: string; content: string; correctAnswer: string; explanation: string; knowledgePoint: string }>,
-  answers: Array<{ questionId: string; userAnswer: string }>,
+  answers: Array<{ questionId: string; userAnswer: string; imageUrls?: string[] }>,
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
@@ -1672,7 +1698,10 @@ export async function evaluateTodoTestAnswers(
 
   const qaPairs = questions.map((q) => {
     const ans = answers.find((a) => a.questionId === q.id);
-    return `题目：${q.content}\n标准答案：${q.correctAnswer}\n学生答案：${ans?.userAnswer || "未作答"}\n解析：${q.explanation}\n知识点：${q.knowledgePoint}`;
+    const imagePart = ans?.imageUrls && ans.imageUrls.length > 0
+      ? `\n学生上传的图片：${ans.imageUrls.join("、")}`
+      : "";
+    return `题目：${q.content}\n标准答案：${q.correctAnswer}\n学生答案：${ans?.userAnswer || "未作答"}${imagePart}\n解析：${q.explanation}\n知识点：${q.knowledgePoint}`;
   }).join("\n\n---\n\n");
 
   const userPrompt = `请评估以下答题情况：

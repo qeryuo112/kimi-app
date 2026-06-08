@@ -50,7 +50,9 @@ export default function Questions() {
   const [showRecognize, setShowRecognize] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
   const [userAnswer, setUserAnswer] = useState("");
+  const [answerImageUrls, setAnswerImageUrls] = useState<string[]>([]);
   const [answerResult, setAnswerResult] = useState<any>(null);
+  const [isAnswerImageUploading, setIsAnswerImageUploading] = useState(false);
   const [selectedQuestions, setSelectedQuestions] = useState<Set<number>>(new Set());
   const [showBatchEdit, setShowBatchEdit] = useState(false);
   const [batchEditForm, setBatchEditForm] = useState({
@@ -118,6 +120,13 @@ export default function Questions() {
   // AI从文件出题
   const aiGenerateFromUrls = trpc.question.aiGenerateFromUrls.useMutation({
     onSuccess: (data) => {
+      const firstQ = data.questions?.[0];
+      console.log("[FRONTEND aiGenerateFromUrls] onSuccess", {
+        count: data.questions?.length,
+        firstContent: firstQ?.content?.slice(0, 50),
+        hasBackslashChem: firstQ?.content?.includes("\\chem"),
+        hasBelChem: firstQ?.content?.includes("\x07chem"),
+      });
       toast.success(`成功生成 ${data.questions?.length || 0} 道题目`);
       utils.question.list.invalidate();
       setShowGenerate(false);
@@ -145,6 +154,13 @@ export default function Questions() {
   // AI出题
   const aiGenerate = trpc.question.aiGenerate.useMutation({
     onSuccess: (data) => {
+      const firstQ = data.questions?.[0];
+      console.log("[FRONTEND aiGenerate] onSuccess", {
+        count: data.questions?.length,
+        firstContent: firstQ?.content?.slice(0, 50),
+        hasBackslashChem: firstQ?.content?.includes("\\chem"),
+        hasBelChem: firstQ?.content?.includes("\x07chem"),
+      });
       toast.success(`成功生成 ${data.questions?.length || 0} 道题目`);
       utils.question.list.invalidate();
       setShowGenerate(false);
@@ -159,6 +175,7 @@ export default function Questions() {
   const submitAnswer = trpc.question.submitAnswer.useMutation({
     onSuccess: (data) => {
       setAnswerResult(data);
+      setAnswerImageUrls([]);
       utils.question.getStats.invalidate();
       utils.question.getWrongAnswers.invalidate();
     },
@@ -503,11 +520,37 @@ export default function Questions() {
     });
   };
 
+  const handleAnswerImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsAnswerImageUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch("/upload", { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(`上传失败: ${err.error || res.statusText}`);
+        return;
+      }
+      const data = await res.json();
+      if (data.url) {
+        setAnswerImageUrls((prev) => [...prev, data.url]);
+        toast.success("图片上传成功");
+      }
+    } catch (err: any) {
+      toast.error(`上传失败: ${err.message}`);
+    } finally {
+      setIsAnswerImageUploading(false);
+    }
+  };
+
   const handleAnswer = () => {
-    if (!currentQuestion || !userAnswer.trim()) return;
+    if (!currentQuestion || (!userAnswer.trim() && answerImageUrls.length === 0)) return;
     submitAnswer.mutate({
       questionId: currentQuestion.id,
       userAnswer: userAnswer.trim(),
+      imageUrls: answerImageUrls.length > 0 ? answerImageUrls : undefined,
     });
   };
 
@@ -646,7 +689,7 @@ export default function Questions() {
             {isShowingAnswer && (
               <div className="text-sm text-muted-foreground">
                 <span className="font-medium text-green-400">答案：</span>
-                {q.correctAnswer}
+                <MathContent content={q.correctAnswer} />
               </div>
             )}
           </div>
@@ -1434,7 +1477,7 @@ export default function Questions() {
                         </div>
                       )}
                       <div className="text-sm text-muted-foreground">
-                        <span className="font-medium text-green-400">答案：</span>{q.correctAnswer}
+                        <span className="font-medium text-green-400">答案：</span><MathContent content={q.correctAnswer} />
                       </div>
                       {q.explanation && (
                         <div className="text-sm text-muted-foreground mt-1">
@@ -1479,75 +1522,109 @@ export default function Questions() {
                 多选题：可选择多个答案
               </p>
             )}
-            {currentQuestion.options && (
-              <div className="space-y-2">
-                {(() => {
-                  try {
-                    const opts = JSON.parse(currentQuestion.options);
-                    const isMultiple = currentQuestion.questionType === "multiple_choice";
-                    // 多选题答案解析为数组
-                    const selectedLabels = isMultiple
-                      ? userAnswer.split("").filter(Boolean)
-                      : [userAnswer].filter(Boolean);
-
-                    const toggleOption = (label: string) => {
-                      if (isMultiple) {
-                        // 多选题：切换选中状态
-                        const newLabels = selectedLabels.includes(label)
-                          ? selectedLabels.filter((l) => l !== label)
-                          : [...selectedLabels, label].sort();
-                        setUserAnswer(newLabels.join(""));
-                      } else {
-                        // 单选题：直接替换
-                        setUserAnswer(label);
-                      }
-                    };
-
-                    return opts.map((opt: any) => {
-                      const isSelected = selectedLabels.includes(opt.label);
-                      return (
-                        <button
-                          key={opt.label}
-                          onClick={() => toggleOption(opt.label)}
-                          className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                            isSelected
-                              ? "border-primary bg-primary/10"
-                              : "border-border hover:bg-secondary/30"
-                          }`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <span className={`font-medium mr-2 ${isSelected ? "text-primary" : ""}`}>
-                              {isMultiple && (
-                                <span className={`inline-flex items-center justify-center w-5 h-5 border rounded ${isSelected ? "bg-primary border-primary text-white" : "border-border"}`}>
-                                  {isSelected && "✓"}
-                                </span>
-                              )}
-                              {!isMultiple && `${opt.label}.`}
-                            </span>
-                            <MathContent content={opt.text} />
-                          </div>
-                        </button>
-                      );
-                    });
-                  } catch {
-                    return null;
+            {(() => {
+              let opts: any[] = [];
+              let hasOpts = false;
+              if (currentQuestion.options) {
+                try {
+                  const parsed = JSON.parse(currentQuestion.options);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    opts = parsed;
+                    hasOpts = true;
                   }
-                })()}
-              </div>
-            )}
-            {!currentQuestion.options && (
-              <Textarea
-                placeholder="请输入你的答案"
-                value={userAnswer}
-                onChange={(e) => setUserAnswer(e.target.value)}
-              />
-            )}
+                } catch { /* ignore */ }
+              }
+
+              if (!hasOpts) {
+                return (
+                  <div className="space-y-2">
+                    <Textarea
+                      placeholder="请输入你的答案"
+                      value={userAnswer}
+                      onChange={(e) => setUserAnswer(e.target.value)}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      {answerImageUrls.map((url, i) => (
+                        <div key={i} className="relative group">
+                          <img src={url} alt="" className="h-16 w-16 object-cover rounded border" />
+                          <button
+                            onClick={() => setAnswerImageUrls((prev) => prev.filter((_, idx) => idx !== i))}
+                            className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleAnswerImageUpload}
+                        />
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs ${isAnswerImageUploading ? "opacity-50" : "hover:bg-secondary"}`}>
+                          {isAnswerImageUploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                          上传图片
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                );
+              }
+
+              const isMultiple = currentQuestion.questionType === "multiple_choice";
+              const selectedLabels = isMultiple
+                ? userAnswer.split("").filter(Boolean)
+                : [userAnswer].filter(Boolean);
+
+              const toggleOption = (label: string) => {
+                if (isMultiple) {
+                  const newLabels = selectedLabels.includes(label)
+                    ? selectedLabels.filter((l) => l !== label)
+                    : [...selectedLabels, label].sort();
+                  setUserAnswer(newLabels.join(""));
+                } else {
+                  setUserAnswer(label);
+                }
+              };
+
+              return (
+                <div className="space-y-2">
+                  {opts.map((opt: any) => {
+                    const isSelected = selectedLabels.includes(opt.label);
+                    return (
+                      <button
+                        key={opt.label}
+                        onClick={() => toggleOption(opt.label)}
+                        className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                          isSelected
+                            ? "border-primary bg-primary/10"
+                            : "border-border hover:bg-secondary/30"
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className={`font-medium mr-2 ${isSelected ? "text-primary" : ""}`}>
+                            {isMultiple && (
+                              <span className={`inline-flex items-center justify-center w-5 h-5 border rounded ${isSelected ? "bg-primary border-primary text-white" : "border-border"}`}>
+                                {isSelected && "✓"}
+                              </span>
+                            )}
+                            {!isMultiple && `${opt.label}.`}
+                          </span>
+                          <MathContent content={opt.text} />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             <div className="flex gap-2">
-              <Button onClick={handleAnswer} disabled={submitAnswer.isPending || !userAnswer}>
+              <Button onClick={handleAnswer} disabled={submitAnswer.isPending || (!userAnswer.trim() && answerImageUrls.length === 0)}>
                 {submitAnswer.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                 提交答案
               </Button>
-              <Button variant="outline" onClick={() => { setCurrentQuestion(null); setUserAnswer(""); setAnswerResult(null); }}>
+              <Button variant="outline" onClick={() => { setCurrentQuestion(null); setUserAnswer(""); setAnswerImageUrls([]); setAnswerResult(null); }}>
                 取消
               </Button>
             </div>
@@ -1821,7 +1898,7 @@ export default function Questions() {
                         </div>
                         <div className="text-sm text-muted-foreground mt-1">
                           <span className="text-green-400">正确答案：</span>
-                          {w.question.correctAnswer}
+                          <MathContent content={w.question.correctAnswer} />
                         </div>
                         {w.question.explanation && (
                           <p className="text-sm text-muted-foreground mt-2">
@@ -2115,7 +2192,7 @@ export default function Questions() {
                             )}
                             <div className="flex gap-2 mt-2">
                               <Badge variant="outline" className="text-xs">
-                                答案: {q.correctAnswer}
+                                答案: <MathContent content={q.correctAnswer} />
                               </Badge>
                               <Badge variant="outline" className="text-xs">
                                 {difficultyMap[q.difficulty]?.label}

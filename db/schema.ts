@@ -331,6 +331,7 @@ export const userAnswers = mysqlTable("user_answers", {
   userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
   questionId: bigint("questionId", { mode: "number", unsigned: true }).notNull(),
   userAnswer: text("userAnswer").notNull(), // 用户答案
+  imageUrls: text("imageUrls"), // 用户上传的图片URL列表(JSON数组)
   isCorrect: boolean("isCorrect").notNull(),
   score: int("score").default(0).notNull(), // 得分 0-100
   timeSpent: int("timeSpent"), // 答题用时(秒)
@@ -346,6 +347,7 @@ export const wrongAnswers = mysqlTable("wrong_answers", {
   userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
   questionId: bigint("questionId", { mode: "number", unsigned: true }).notNull(),
   userAnswer: text("userAnswer").notNull(),
+  imageUrls: text("imageUrls"), // 用户上传的图片URL列表(JSON数组)
   wrongCount: int("wrongCount").default(1).notNull(), // 错误次数
   lastWrongAt: timestamp("lastWrongAt").defaultNow().notNull(),
   mastered: boolean("mastered").default(false).notNull(), // 是否已掌握

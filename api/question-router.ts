@@ -61,6 +61,7 @@ export const questionRouter = createRouter({
         nodeId: z.number().optional(),
         skillId: z.number().optional(),
         requireChemicalStructure: z.boolean().optional(),
+        customInstructions: z.string().max(500).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -91,7 +92,8 @@ export const questionRouter = createRouter({
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined,
-        input.requireChemicalStructure || false
+        input.requireChemicalStructure || false,
+        input.customInstructions
       );
 
       // 获取用户的学科和知识点列表，用于AI识别匹配
@@ -164,6 +166,8 @@ export const questionRouter = createRouter({
         };
         console.log("[question.aiGenerate] 准备插入题目", {
           content: q.content?.slice(0, 50),
+          hasBackslashChem: q.content?.includes("\\chem"),
+          hasBelChem: q.content?.includes("\x07chem"),
           optionsType: typeof q.options,
           options: q.options,
           optionsJson: insertValues.options,
@@ -276,6 +280,11 @@ export const questionRouter = createRouter({
           }
         }
 
+        console.log("[question.aiGenerateFromUrls] 准备插入题目", {
+          content: q.content?.slice(0, 50),
+          hasBackslashChem: q.content?.includes("\\chem"),
+          hasBelChem: q.content?.includes("\x07chem"),
+        });
         const [{ id }] = await db
           .insert(questions)
           .values({
@@ -368,6 +377,11 @@ export const questionRouter = createRouter({
           }
         }
 
+        console.log("[question.aiGenerateFromUrls] 准备插入题目", {
+          content: q.content?.slice(0, 50),
+          hasBackslashChem: q.content?.includes("\\chem"),
+          hasBelChem: q.content?.includes("\x07chem"),
+        });
         const [{ id }] = await db
           .insert(questions)
           .values({
@@ -677,6 +691,7 @@ export const questionRouter = createRouter({
       z.object({
         questionId: z.number(),
         userAnswer: z.string(),
+        imageUrls: z.array(z.string()).optional(),
         timeSpent: z.number().optional(), // 秒
       })
     )
@@ -702,6 +717,7 @@ export const questionRouter = createRouter({
         question.correctAnswer,
         input.userAnswer,
         question.questionType,
+        input.imageUrls,
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined
@@ -714,6 +730,7 @@ export const questionRouter = createRouter({
           userId: ctx.user.id,
           questionId: input.questionId,
           userAnswer: input.userAnswer,
+          imageUrls: input.imageUrls ? JSON.stringify(input.imageUrls) : null,
           isCorrect: evaluation.isCorrect,
           score: evaluation.score,
           timeSpent: input.timeSpent,
@@ -747,6 +764,7 @@ export const questionRouter = createRouter({
             userId: ctx.user.id,
             questionId: input.questionId,
             userAnswer: input.userAnswer,
+            imageUrls: input.imageUrls ? JSON.stringify(input.imageUrls) : null,
             wrongCount: 1,
             lastWrongAt: new Date(),
             mastered: false,
