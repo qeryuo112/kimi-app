@@ -391,8 +391,11 @@ export const questionRouter = createRouter({
         options: z.string().optional(),
         correctAnswer: z.string().optional(),
         explanation: z.string().optional(),
-        difficulty: z.number().min(1).max(5).optional(),
+        difficulty: z.number().min(0).max(5).optional(),
         imageUrl: z.string().nullable().optional(),
+        subjectId: z.number().optional(),
+        nodeId: z.number().optional(),
+        skillId: z.number().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -424,6 +427,9 @@ export const questionRouter = createRouter({
       if (input.explanation !== undefined) updateData.explanation = input.explanation;
       if (input.difficulty !== undefined) updateData.difficulty = input.difficulty;
       if (input.imageUrl !== undefined) updateData.imageUrl = input.imageUrl;
+      if (input.subjectId !== undefined) updateData.subjectId = input.subjectId;
+      if (input.nodeId !== undefined) updateData.nodeId = input.nodeId;
+      if (input.skillId !== undefined) updateData.skillId = input.skillId;
 
       // 合并后的题目数据（用于判断是否需要AI重生成）
       const mergedContent = input.content !== undefined ? input.content : existing.content;

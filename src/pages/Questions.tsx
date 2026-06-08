@@ -100,6 +100,7 @@ export default function Questions() {
   // 获取学科和知识点列表，用于显示关联信息
   const { data: subjects } = trpc.subject.list.useQuery();
   const { data: knowledgeNodes } = trpc.knowledge.list.useQuery();
+  const { data: skills } = trpc.skill.list.useQuery();
 
   // 获取试卷列表
   const { data: examPapers } = trpc.exam.list.useQuery();
@@ -271,6 +272,9 @@ export default function Questions() {
     explanation: "",
     difficulty: 3,
     imageUrl: "",
+    subjectId: undefined as number | undefined,
+    nodeId: undefined as number | undefined,
+    skillId: undefined as number | undefined,
   });
   const [editOptions, setEditOptions] = useState<Array<{ label: string; text: string }>>([]);
   const [isEditImageUploading, setIsEditImageUploading] = useState(false);
@@ -284,6 +288,9 @@ export default function Questions() {
       explanation: q.explanation || "",
       difficulty: q.difficulty,
       imageUrl: q.imageUrl || "",
+      subjectId: q.subjectId ?? undefined,
+      nodeId: q.nodeId ?? undefined,
+      skillId: q.skillId ?? undefined,
     });
     // 解析选项
     try {
@@ -304,6 +311,9 @@ export default function Questions() {
       explanation: editForm.explanation,
       difficulty: editForm.difficulty,
       imageUrl: editForm.imageUrl || null,
+      subjectId: editForm.subjectId,
+      nodeId: editForm.nodeId,
+      skillId: editForm.skillId,
     });
   };
 
@@ -762,6 +772,54 @@ export default function Questions() {
                 )}
               </div>
             </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-sm font-medium">科目</label>
+                <Select
+                  value={editForm.subjectId ? String(editForm.subjectId) : ""}
+                  onValueChange={(v) => setEditForm({ ...editForm, subjectId: v ? parseInt(v) : undefined })}
+                >
+                  <SelectTrigger><SelectValue placeholder="选择科目" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">无</SelectItem>
+                    {subjects?.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">知识点</label>
+                <Select
+                  value={editForm.nodeId ? String(editForm.nodeId) : ""}
+                  onValueChange={(v) => setEditForm({ ...editForm, nodeId: v ? parseInt(v) : undefined })}
+                >
+                  <SelectTrigger><SelectValue placeholder="选择知识点" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">无</SelectItem>
+                    {knowledgeNodes?.map((n) => (
+                      <SelectItem key={n.id} value={String(n.id)}>{n.title}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">技能维度</label>
+                <Select
+                  value={editForm.skillId ? String(editForm.skillId) : ""}
+                  onValueChange={(v) => setEditForm({ ...editForm, skillId: v ? parseInt(v) : undefined })}
+                >
+                  <SelectTrigger><SelectValue placeholder="选择技能" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">无</SelectItem>
+                    {skills?.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div>
               <label className="text-sm font-medium">难度</label>
               <Select

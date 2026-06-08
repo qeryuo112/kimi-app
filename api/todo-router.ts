@@ -256,6 +256,7 @@ export const todoRouter = createRouter({
             ))
         : [];
       const nodeMap = new Map(nodeDetails.map((n) => [n.title, n]));
+      const nodeIds = nodeDetails.map((n) => n.id);
 
       const [setting] = await db
         .select()
@@ -293,7 +294,7 @@ export const todoRouter = createRouter({
         }
       }
 
-      // 智能选题：先从题库中找相关题目
+      // 智能选题：先从题库中找相关题目（数据库层预过滤 + 内存精确评分）
       const allQuestions = await db
         .select()
         .from(questions)
@@ -304,6 +305,8 @@ export const todoRouter = createRouter({
 
       // 根据学科和知识点匹配题目
       const matchedQuestions = allQuestions.filter((q) => {
+        // 精确匹配 nodeId
+        if (q.nodeId && nodeIds.includes(q.nodeId)) return true;
         // 匹配 subjectId
         if (subjectId && q.subjectId === subjectId) return true;
         // 匹配 detectedSubject（学科匹配）
@@ -327,13 +330,17 @@ export const todoRouter = createRouter({
         return false;
       });
 
-      // 给题目打分并排序（错题权重更高）
+      // 给题目打分并排序（统一评分权重）
       const scoredQuestions = matchedQuestions.map((q) => {
         let score = 0;
-        // 基础匹配分数（可累加）
+
+        // nodeId 精确匹配 +100 分（最高权重）
+        if (q.nodeId && nodeIds.includes(q.nodeId)) score += 100;
+
+        // subjectId 精确匹配 +50 分
         if (subjectId && q.subjectId === subjectId) score += 50;
 
-        // 知识点匹配 +40 分
+        // 知识点文本匹配 +40 分
         if (q.detectedKnowledgePoint) {
           const normalizedQKP = q.detectedKnowledgePoint.toLowerCase();
           const kpMatch = nodeTitles.some((title: string) =>
@@ -343,7 +350,7 @@ export const todoRouter = createRouter({
           if (kpMatch) score += 40;
         }
 
-        // 学科匹配 +10 分
+        // 学科文本匹配 +10 分
         if (q.detectedSubject && todo.subject) {
           const normalizedQSubject = q.detectedSubject.trim().toLowerCase();
           if (normalizedQSubject === normalizedTodoSubject ||
@@ -1197,14 +1204,29 @@ export const todoRouter = createRouter({
         return false;
       });
 
-      // 给题目打分并排序（错题权重更高）
+      // 给题目打分并排序（统一评分权重，与 generateTest 保持一致）
       const scoredQuestions = matchedQuestions.map((q) => {
         let score = 0;
-        // 基础匹配分数
+
+        // nodeId 精确匹配 +100 分（最高权重）
         if (nodeId && q.nodeId === nodeId) score += 100;
-        else if (subjectId && q.subjectId === subjectId) score += 50;
-        else if (q.detectedKnowledgePoint) score += 30;
-        else if (q.detectedSubject) score += 10;
+
+        // subjectId 精确匹配 +50 分
+        if (subjectId && q.subjectId === subjectId) score += 50;
+
+        // 知识点文本匹配 +40 分
+        if (q.detectedKnowledgePoint) {
+          const kpMatch = review.nodeTitle.toLowerCase().includes(q.detectedKnowledgePoint.toLowerCase()) ||
+            q.detectedKnowledgePoint.toLowerCase().includes(review.nodeTitle.toLowerCase());
+          if (kpMatch) score += 40;
+        }
+
+        // 学科文本匹配 +10 分
+        if (q.detectedSubject) {
+          const subMatch = review.subjectTitle.toLowerCase().includes(q.detectedSubject.toLowerCase()) ||
+            q.detectedSubject.toLowerCase().includes(review.subjectTitle.toLowerCase());
+          if (subMatch) score += 10;
+        }
 
         // 错题权重：如果是错题，大幅提高分数
         const isWrongAnswer = userWrongAnswers.some(wa =>
