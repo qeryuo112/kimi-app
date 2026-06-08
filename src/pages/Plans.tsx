@@ -38,6 +38,7 @@ export default function Plans() {
   const [planRequirements, setPlanRequirements] = useState<Record<number, string>>({});
   const [showSelectSubjects, setShowSelectSubjects] = useState(false);
   const [selectedExistingIds, setSelectedExistingIds] = useState<Set<number>>(new Set());
+  const [genDate, setGenDate] = useState(() => new Date().toISOString().split("T")[0]);
 
   // 创建计划
   const createPlan = trpc.plan.create.useMutation({
@@ -815,17 +816,25 @@ export default function Plans() {
                               </div>
                             )}
 
-                            {/* 生成今日任务 + 删除 */}
+                            {/* 生成某日任务 + 删除 */}
                             <div className="flex gap-2 w-full">
-                              <Button
-                                variant="outline"
-                                onClick={() => generateTodos.mutate({ planId: plan.id })}
-                                disabled={generateTodos.isPending || !plan.aiPlan}
-                                className="flex-1"
-                              >
-                                <CheckSquare className="h-4 w-4 mr-1" />
-                                {generateTodos.isPending ? "生成中..." : "生成今日任务"}
-                              </Button>
+                              <div className="flex-1 flex gap-2">
+                                <Input
+                                  type="date"
+                                  value={genDate}
+                                  onChange={(e) => setGenDate(e.target.value)}
+                                  className="w-32 text-xs h-9"
+                                />
+                                <Button
+                                  variant="outline"
+                                  onClick={() => generateTodos.mutate({ planId: plan.id, date: genDate })}
+                                  disabled={generateTodos.isPending || !plan.aiPlan}
+                                  className="flex-1"
+                                >
+                                  <CheckSquare className="h-4 w-4 mr-1" />
+                                  {generateTodos.isPending ? "生成中..." : "生成任务"}
+                                </Button>
+                              </div>
                               {plan.aiPlan && (
                                 <Button
                                   variant="destructive"

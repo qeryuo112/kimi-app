@@ -26,14 +26,15 @@ function calculateNextInterval(currentInterval: number, mastery: number): number
 }
 
 export const todoRouter = createRouter({
-  // 为指定计划生成今日任务（从dailyPlan中解析）
+  // 为指定计划生成某日任务（从dailyPlan中解析）
+  // date 不传时默认生成今日任务
   generateTodayTodos: authedQuery
-    .input(z.object({ planId: z.number() }))
+    .input(z.object({ planId: z.number(), date: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const today = new Date().toISOString().split("T")[0];
+      const targetDate = input.date || new Date().toISOString().split("T")[0];
 
-      // 检查今天是否已生成过
+      // 检查该日期是否已生成过
       const existing = await db
         .select()
         .from(dailyTodos)
@@ -41,12 +42,12 @@ export const todoRouter = createRouter({
           and(
             eq(dailyTodos.userId, ctx.user.id),
             eq(dailyTodos.planId, input.planId),
-            eq(dailyTodos.date, today)
+            eq(dailyTodos.date, targetDate)
           )
         );
 
       if (existing.length > 0) {
-        return { generated: false, message: "今日任务已生成", count: existing.length };
+        return { generated: false, message: `${targetDate} 任务已生成`, count: existing.length };
       }
 
       // 获取计划
@@ -71,42 +72,42 @@ export const todoRouter = createRouter({
         throw new Error("计划中没有日计划数据");
       }
 
-      // 计算今天是第几天（从开始日期算起）
+      // 计算目标日期是第几天（从开始日期算起）
       const startDate = plan.startDate
         ? new Date(plan.startDate).toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0];
 
       const start = new Date(startDate);
-      const todayDate = new Date(today);
-      const dayDiff = Math.floor((todayDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-      const todayDayIndex = dayDiff + 1;
+      const target = new Date(targetDate);
+      const dayDiff = Math.floor((target.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      const targetDayIndex = dayDiff + 1;
 
-      // 找到今天的计划项
-      const todayItems = dailyPlan.filter((d: any) => d.day === todayDayIndex);
+      // 找到目标日期的计划项
+      const targetItems = dailyPlan.filter((d: any) => d.day === targetDayIndex);
 
-      // 同时查找复习调度中今天需要复习的内容
-      const todayReviews = await db
+      // 同时查找复习调度中目标日期需要复习的内容
+      const targetReviews = await db
         .select()
         .from(reviewSchedules)
         .where(
           and(
             eq(reviewSchedules.userId, ctx.user.id),
             eq(reviewSchedules.planId, input.planId),
-            eq(reviewSchedules.nextReviewDate, today),
+            eq(reviewSchedules.nextReviewDate, targetDate),
             eq(reviewSchedules.status, "active")
           )
         );
 
       const created = [];
 
-      // 插入今日新学任务
-      for (const item of todayItems) {
+      // 插入目标日期新学任务
+      for (const item of targetItems) {
         const [{ id }] = await db
           .insert(dailyTodos)
           .values({
             userId: ctx.user.id,
             planId: input.planId,
-            date: today,
+            date: targetDate,
             dayIndex: item.day,
             subject: item.subject || "",
             knowledgeNodes: JSON.stringify(item.knowledgeNodes || []),
@@ -119,14 +120,14 @@ export const todoRouter = createRouter({
 
       }
 
-      // 插入今日复习任务（作为todo）
-      for (const rev of todayReviews) {
+      // 插入目标日期复习任务（作为todo）
+      for (const rev of targetReviews) {
         const [{ id }] = await db
           .insert(dailyTodos)
           .values({
             userId: ctx.user.id,
             planId: input.planId,
-            date: today,
+            date: targetDate,
             dayIndex: 0, // 复习任务标记为0
             subject: rev.subjectTitle,
             knowledgeNodes: JSON.stringify([rev.nodeTitle]),
@@ -138,7 +139,7 @@ export const todoRouter = createRouter({
         created.push(id);
       }
 
-      return { generated: true, count: created.length };
+      return { generated: true, count: created.length, date: targetDate };
     }),
 
   // 获取今日任务（所有计划汇总）
