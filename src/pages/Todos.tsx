@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/providers/trpc";
 import { toast } from "sonner";
+import { MathContent } from "@/components/MathContent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -827,24 +828,40 @@ export default function Todos() {
                   : [currentAnswer].filter(Boolean);
 
                 const toggleOption = (label: string) => {
+                  console.log("[Todos toggleOption] click", {
+                    label,
+                    questionId: q.id,
+                    questionType: q.questionType,
+                    isMultiple,
+                    currentAnswer,
+                    selectedLabels,
+                    allAnswers: testAnswers,
+                  });
                   if (isMultiple) {
-                    // 多选题：切换选中状态
                     const newLabels = selectedLabels.includes(label)
                       ? selectedLabels.filter((l) => l !== label)
                       : [...selectedLabels, label].sort();
-                    setTestAnswers({ ...testAnswers, [q.id]: newLabels.join("") });
+                    const newAnswer = newLabels.join("");
+                    console.log("[Todos toggleOption] multiple choice update", {
+                      label,
+                      newLabels,
+                      newAnswer,
+                    });
+                    setTestAnswers({ ...testAnswers, [q.id]: newAnswer });
                   } else {
-                    // 单选题：直接替换
+                    console.log("[Todos toggleOption] single choice update", {
+                      label,
+                    });
                     setTestAnswers({ ...testAnswers, [q.id]: label });
                   }
                 };
 
                 return (
                   <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
-                    <p className="text-sm font-medium mb-2">
+                    <div className="text-sm font-medium mb-2">
                       <span className="text-primary mr-1">{idx + 1}.</span>
-                      {q.content}
-                    </p>
+                      <MathContent content={q.content} />
+                    </div>
                     {isMultiple && (
                       <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
                         <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
@@ -874,7 +891,7 @@ export default function Todos() {
                                   )}
                                   {!isMultiple && `${opt.label}.`}
                                 </span>
-                                <span>{opt.text}</span>
+                                <MathContent content={opt.text} />
                               </div>
                             </button>
                           );
@@ -959,12 +976,12 @@ export default function Todos() {
                     <div key={q.id} className={`p-2 rounded text-sm ${isCorrect ? "bg-green-500/5" : "bg-red-500/5"}`}>
                       <div className="flex items-center gap-2">
                         {isCorrect ? <CheckCircle2 className="h-3.5 w-3.5 text-green-400" /> : <XCircle className="h-3.5 w-3.5 text-red-400" />}
-                        <span className="font-medium">{idx + 1}. {q.content}</span>
+                        <div className="font-medium"><span>{idx + 1}.</span> <MathContent content={q.content} /></div>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         你的答案：{userAns || "未作答"} · 正确答案：{q.correctAnswer}
                       </p>
-                      <p className="text-xs text-primary mt-0.5">{q.explanation}</p>
+                      <MathContent content={q.explanation} className="text-xs text-primary mt-0.5" />
                     </div>
                   );
                 })}
@@ -1065,22 +1082,40 @@ export default function Todos() {
                   : [currentAnswer].filter(Boolean);
 
                 const toggleOption = (label: string) => {
+                  console.log("[Todos reviewToggleOption] click", {
+                    label,
+                    questionId: q.id,
+                    questionType: q.questionType,
+                    isMultiple,
+                    currentAnswer,
+                    selectedLabels,
+                    allAnswers: reviewTestAnswers,
+                  });
                   if (isMultiple) {
                     const newLabels = selectedLabels.includes(label)
                       ? selectedLabels.filter((l) => l !== label)
                       : [...selectedLabels, label].sort();
-                    setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: newLabels.join("") });
+                    const newAnswer = newLabels.join("");
+                    console.log("[Todos reviewToggleOption] multiple choice update", {
+                      label,
+                      newLabels,
+                      newAnswer,
+                    });
+                    setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: newAnswer });
                   } else {
+                    console.log("[Todos reviewToggleOption] single choice update", {
+                      label,
+                    });
                     setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: label });
                   }
                 };
 
                 return (
                   <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
-                    <p className="text-sm font-medium mb-2">
+                    <div className="text-sm font-medium mb-2">
                       <span className="text-primary mr-1">{idx + 1}.</span>
-                      {q.content}
-                    </p>
+                      <MathContent content={q.content} />
+                    </div>
                     {isMultiple && (
                       <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
                         <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
@@ -1110,7 +1145,7 @@ export default function Todos() {
                                   )}
                                   {opt.label}.
                                 </span>
-                                <span className="flex-1">{opt.text}</span>
+                                <MathContent content={opt.text} className="flex-1" />
                               </div>
                             </button>
                           );
@@ -1274,12 +1309,12 @@ export default function Todos() {
                         <XCircle className="h-4 w-4 text-red-400 mt-0.5" />
                       )}
                       <div className="flex-1">
-                        <p className="font-medium">{idx + 1}. {q.content}</p>
+                        <div className="font-medium"><span>{idx + 1}.</span> <MathContent content={q.content} /></div>
                         <p className="text-xs text-muted-foreground mt-1">
                           你的答案：{q.userAnswer || "未作答"} · 正确答案：{q.correctAnswer}
                         </p>
                         {q.explanation && (
-                          <p className="text-xs text-primary mt-1">{q.explanation}</p>
+                          <MathContent content={q.explanation} className="text-xs text-primary mt-1" />
                         )}
                       </div>
                     </div>

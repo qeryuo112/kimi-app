@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { questions, userAnswers, wrongAnswers, knowledgeNodes, userSettings, subjects } from "@db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { generateQuestions, generateQuestionsFromFileUrls, evaluateAnswer, recognizeQuestionsFromUrls, chatWithAI } from "./lib/ai";
 import type { KimiContent } from "./lib/ai";
 import { processUrlsToContentBlocks } from "./lib/document-processor";
@@ -115,6 +115,7 @@ export const questionRouter = createRouter({
         let finalDetectedSubject: string | null = q.detectedSubject || null;
         let finalDetectedKnowledgePoint: string | null = q.detectedKnowledgePoint || null;
 
+        // 用户手动设置的标签优先；未设置时，AI返回的标签保留原始值
         if (!matchedSubjectId && q.detectedSubject) {
           const normalized = q.detectedSubject.trim().toLowerCase();
           const matchedSubject = userSubjects.find(s => s.title.trim().toLowerCase() === normalized);
@@ -122,9 +123,8 @@ export const questionRouter = createRouter({
             matchedSubjectId = matchedSubject.id;
             finalDetectedSubject = matchedSubject.title;
           } else {
-            // 精确匹配失败，清空编造标签
-            finalDetectedSubject = null;
-            console.log("[question.aiGenerate] 学科标签不匹配，已清空", { detectedSubject: q.detectedSubject, availableSubjects: userSubjects.map(s => s.title) });
+            // 精确匹配失败，保留AI原始值（用户后续可批量修改）
+            console.log("[question.aiGenerate] 学科标签未匹配，保留AI原始值", { detectedSubject: q.detectedSubject });
           }
         }
 
@@ -139,9 +139,8 @@ export const questionRouter = createRouter({
               matchedSubjectId = matchedNode.subjectId;
             }
           } else {
-            // 精确匹配失败，清空编造标签
-            finalDetectedKnowledgePoint = null;
-            console.log("[question.aiGenerate] 知识点标签不匹配，已清空", { detectedKnowledgePoint: q.detectedKnowledgePoint, availableNodes: userNodes.map(n => n.title).slice(0, 20) });
+            // 精确匹配失败，保留AI原始值（用户后续可批量修改）
+            console.log("[question.aiGenerate] 知识点标签未匹配，保留AI原始值", { detectedKnowledgePoint: q.detectedKnowledgePoint });
           }
         }
 
@@ -249,6 +248,7 @@ export const questionRouter = createRouter({
         let finalDetectedSubject: string | null = q.detectedSubject || null;
         let finalDetectedKnowledgePoint: string | null = q.detectedKnowledgePoint || null;
 
+        // 用户手动设置的标签优先；未设置时，AI返回的标签保留原始值
         if (!matchedSubjectId && q.detectedSubject) {
           const normalized = q.detectedSubject.trim().toLowerCase();
           const matchedSubject = userSubjects.find(s => s.title.trim().toLowerCase() === normalized);
@@ -256,8 +256,8 @@ export const questionRouter = createRouter({
             matchedSubjectId = matchedSubject.id;
             finalDetectedSubject = matchedSubject.title;
           } else {
-            finalDetectedSubject = null;
-            console.log("[question.aiGenerateFromUrls] 学科标签不匹配，已清空", { detectedSubject: q.detectedSubject });
+            // 精确匹配失败，保留AI原始值（用户后续可批量修改）
+            console.log("[question.aiGenerateFromUrls] 学科标签未匹配，保留AI原始值", { detectedSubject: q.detectedSubject });
           }
         }
 
@@ -271,8 +271,8 @@ export const questionRouter = createRouter({
               matchedSubjectId = matchedNode.subjectId;
             }
           } else {
-            finalDetectedKnowledgePoint = null;
-            console.log("[question.aiGenerateFromUrls] 知识点标签不匹配，已清空", { detectedKnowledgePoint: q.detectedKnowledgePoint });
+            // 精确匹配失败，保留AI原始值（用户后续可批量修改）
+            console.log("[question.aiGenerateFromUrls] 知识点标签未匹配，保留AI原始值", { detectedKnowledgePoint: q.detectedKnowledgePoint });
           }
         }
 

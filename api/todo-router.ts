@@ -25,6 +25,31 @@ function calculateNextInterval(currentInterval: number, mastery: number): number
   return 1; // 掌握差，隔天复习
 }
 
+// 推断题目实际题型（AI混合模式下可能返回"mixed"，需根据内容推断）
+function inferQuestionType(q: {
+  questionType?: string;
+  options?: Array<{ label: string; text: string }>;
+  correctAnswer?: string;
+}): "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" {
+  // 如果已经有明确的非mixed题型，直接返回
+  if (q.questionType && q.questionType !== "mixed") {
+    return q.questionType as "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay";
+  }
+  // 有选项 = 选择题
+  if (q.options && Array.isArray(q.options) && q.options.length > 0) {
+    const ans = (q.correctAnswer || "").trim();
+    // 正确答案长度>1 = 多选题（如 "AB"）
+    if (ans.length > 1) {
+      return "multiple_choice";
+    }
+    return "single_choice";
+  }
+  // 无选项，按原始类型或默认填空题
+  if (q.questionType === "short_answer") return "short_answer";
+  if (q.questionType === "essay") return "essay";
+  return "fill_blank";
+}
+
 export const todoRouter = createRouter({
   // 为指定计划生成某日任务（从dailyPlan中解析）
   // date 不传时默认生成今日任务
@@ -258,6 +283,7 @@ export const todoRouter = createRouter({
         : [];
       const nodeMap = new Map(nodeDetails.map((n) => [n.title, n]));
       const nodeIds = nodeDetails.map((n) => n.id);
+      const nodeIdMap = new Map(nodeDetails.map((n) => [n.id, n.title]));
 
       const [setting] = await db
         .select()
@@ -390,8 +416,12 @@ export const todoRouter = createRouter({
             options: q.options ? JSON.parse(q.options) : undefined,
             correctAnswer: q.correctAnswer,
             explanation: q.explanation || "",
-            knowledgePoint: q.detectedKnowledgePoint || "综合",
-            questionType: q.questionType,
+            knowledgePoint: q.detectedKnowledgePoint || (q.nodeId && nodeIdMap.get(q.nodeId)) || "综合",
+            questionType: inferQuestionType({
+              questionType: q.questionType || undefined,
+              options: q.options ? JSON.parse(q.options) : undefined,
+              correctAnswer: q.correctAnswer,
+            }),
           })),
           source: "database",
         };
@@ -416,7 +446,7 @@ export const todoRouter = createRouter({
           .values({
             userId: ctx.user.id,
             subjectId: todo.subjectId,
-            questionType: q.questionType || input.questionType,
+            questionType: inferQuestionType(q),
             content: q.content,
             options: q.options ? JSON.stringify(q.options) : null,
             correctAnswer: q.correctAnswer,
@@ -430,7 +460,14 @@ export const todoRouter = createRouter({
         savedQuestionIds.push(id);
       }
 
-      return { ...result, source: "ai", savedQuestionIds };
+      return {
+        questions: result.questions.map((q) => ({
+          ...q,
+          questionType: inferQuestionType(q),
+        })),
+        source: "ai",
+        savedQuestionIds,
+      };
     }),
 
   // 从文件生成测试题
@@ -1263,7 +1300,11 @@ export const todoRouter = createRouter({
             correctAnswer: q.correctAnswer,
             explanation: q.explanation || "",
             knowledgePoint: review.nodeTitle,
-            questionType: q.questionType,
+            questionType: inferQuestionType({
+              questionType: q.questionType || undefined,
+              options: q.options ? JSON.parse(q.options) : undefined,
+              correctAnswer: q.correctAnswer,
+            }),
           })),
           source: "database",
           reviewInfo: {
@@ -1300,7 +1341,7 @@ export const todoRouter = createRouter({
             userId: ctx.user.id,
             subjectId: finalSubjectId,
             nodeId: finalNodeId,
-            questionType: (q.questionType || input.questionType) as "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed",
+            questionType: inferQuestionType(q),
             content: q.content,
             options: q.options ? JSON.stringify(q.options) : null,
             correctAnswer: q.correctAnswer,
@@ -1318,6 +1359,7 @@ export const todoRouter = createRouter({
         questions: result.questions.map((q, idx) => ({
           ...q,
           id: `ai-${savedQuestionIds[idx]}`,
+          questionType: inferQuestionType(q),
         })),
         source: "ai",
         reviewInfo: {

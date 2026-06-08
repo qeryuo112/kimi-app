@@ -89,6 +89,7 @@ export function MathContent({ content, className = "" }: MathContentProps) {
       try {
         const html = katex.renderToString(part.value, {
           throwOnError: false,
+          strict: false,
           displayMode: part.type === "block-math",
         });
         return (
