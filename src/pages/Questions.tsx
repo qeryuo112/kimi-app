@@ -52,6 +52,12 @@ export default function Questions() {
   const [userAnswer, setUserAnswer] = useState("");
   const [answerResult, setAnswerResult] = useState<any>(null);
   const [selectedQuestions, setSelectedQuestions] = useState<Set<number>>(new Set());
+  const [showBatchEdit, setShowBatchEdit] = useState(false);
+  const [batchEditForm, setBatchEditForm] = useState({
+    subjectId: undefined as number | undefined,
+    nodeId: undefined as number | undefined,
+    skillId: undefined as number | undefined,
+  });
 
   const [genForm, setGenForm] = useState({
     topic: "",
@@ -190,6 +196,20 @@ export default function Questions() {
       utils.question.getWrongAnswers.invalidate();
       setSelectedQuestions(new Set());
       toast.success(`已删除 ${data.count} 道题目`);
+    },
+  });
+
+  // 批量修改标签
+  const updateManyQuestions = trpc.question.updateMany.useMutation({
+    onSuccess: (data) => {
+      utils.question.list.invalidate();
+      utils.question.getStats.invalidate();
+      setShowBatchEdit(false);
+      setBatchEditForm({ subjectId: undefined, nodeId: undefined, skillId: undefined });
+      toast.success(`已更新 ${data.count} 道题目标签`);
+    },
+    onError: (err) => {
+      toast.error(err.message || "批量更新失败");
     },
   });
 
@@ -1218,6 +1238,7 @@ export default function Questions() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="0">混合难度</SelectItem>
                     <SelectItem value="1">简单</SelectItem>
                     <SelectItem value="2">较易</SelectItem>
                     <SelectItem value="3">中等</SelectItem>
@@ -1603,22 +1624,112 @@ export default function Questions() {
                   已选 {selectedQuestions.size} / {questionList.length}
                 </span>
                 {selectedQuestions.size > 0 && (
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="h-7 text-xs"
-                    onClick={() => {
-                      if (confirm(`确定要删除选中的 ${selectedQuestions.size} 道题目吗？`)) {
-                        deleteManyQuestions.mutate({ ids: Array.from(selectedQuestions) });
-                      }
-                    }}
-                    disabled={deleteManyQuestions.isPending}
-                  >
-                    {deleteManyQuestions.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <X className="h-3 w-3 mr-1" />}
-                    批量删除
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => setShowBatchEdit(true)}
+                    >
+                      批量修改标签
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        if (confirm(`确定要删除选中的 ${selectedQuestions.size} 道题目吗？`)) {
+                          deleteManyQuestions.mutate({ ids: Array.from(selectedQuestions) });
+                        }
+                      }}
+                      disabled={deleteManyQuestions.isPending}
+                    >
+                      {deleteManyQuestions.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <X className="h-3 w-3 mr-1" />}
+                      批量删除
+                    </Button>
+                  </>
                 )}
               </div>
+
+              {/* 批量修改标签面板 */}
+              {showBatchEdit && selectedQuestions.size > 0 && (
+                <Card className="border-primary/30">
+                  <CardContent className="pt-4 space-y-3">
+                    <p className="text-sm font-medium">批量修改 {selectedQuestions.size} 道题目的标签</p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-sm text-muted-foreground">科目</label>
+                        <Select
+                          value={batchEditForm.subjectId ? String(batchEditForm.subjectId) : "none"}
+                          onValueChange={(v) => setBatchEditForm({ ...batchEditForm, subjectId: v === "none" ? undefined : parseInt(v) })}
+                        >
+                          <SelectTrigger><SelectValue placeholder="不修改" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">不修改</SelectItem>
+                            {subjects?.map((s) => (
+                              <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-sm text-muted-foreground">知识点</label>
+                        <Select
+                          value={batchEditForm.nodeId ? String(batchEditForm.nodeId) : "none"}
+                          onValueChange={(v) => setBatchEditForm({ ...batchEditForm, nodeId: v === "none" ? undefined : parseInt(v) })}
+                        >
+                          <SelectTrigger><SelectValue placeholder="不修改" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">不修改</SelectItem>
+                            {knowledgeNodes?.map((n) => (
+                              <SelectItem key={n.id} value={String(n.id)}>{n.title}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-sm text-muted-foreground">技能维度</label>
+                        <Select
+                          value={batchEditForm.skillId ? String(batchEditForm.skillId) : "none"}
+                          onValueChange={(v) => setBatchEditForm({ ...batchEditForm, skillId: v === "none" ? undefined : parseInt(v) })}
+                        >
+                          <SelectTrigger><SelectValue placeholder="不修改" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">不修改</SelectItem>
+                            {skills?.map((s) => (
+                              <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          const payload: any = { ids: Array.from(selectedQuestions) };
+                          if (batchEditForm.subjectId !== undefined) payload.subjectId = batchEditForm.subjectId;
+                          if (batchEditForm.nodeId !== undefined) payload.nodeId = batchEditForm.nodeId;
+                          if (batchEditForm.skillId !== undefined) payload.skillId = batchEditForm.skillId;
+                          if (Object.keys(payload).length <= 1) {
+                            toast.error("请至少选择一个要修改的标签");
+                            return;
+                          }
+                          updateManyQuestions.mutate(payload);
+                        }}
+                        disabled={updateManyQuestions.isPending}
+                      >
+                        {updateManyQuestions.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                        确认修改
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setShowBatchEdit(false)}>
+                        取消
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {questionList.map((q) => (
                 <div key={q.id} className="relative">
                   {renderQuestionCard(q, true, true)}

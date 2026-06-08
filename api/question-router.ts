@@ -635,6 +635,42 @@ export const questionRouter = createRouter({
       return { success: true, count: input.ids.length };
     }),
 
+  // 批量修改题目标签
+  updateMany: authedQuery
+    .input(
+      z.object({
+        ids: z.array(z.number()).min(1),
+        subjectId: z.number().optional(),
+        nodeId: z.number().optional(),
+        skillId: z.number().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+
+      // 校验所有题目属于当前用户
+      const existing = await db
+        .select()
+        .from(questions)
+        .where(and(inArray(questions.id, input.ids), eq(questions.userId, ctx.user.id)));
+
+      if (existing.length !== input.ids.length) {
+        throw new Error("部分题目不存在或无权限");
+      }
+
+      const updateData: Partial<typeof questions.$inferInsert> = {};
+      if (input.subjectId !== undefined) updateData.subjectId = input.subjectId;
+      if (input.nodeId !== undefined) updateData.nodeId = input.nodeId;
+      if (input.skillId !== undefined) updateData.skillId = input.skillId;
+
+      await db
+        .update(questions)
+        .set(updateData)
+        .where(and(inArray(questions.id, input.ids), eq(questions.userId, ctx.user.id)));
+
+      return { success: true, count: input.ids.length };
+    }),
+
   // 提交答案
   submitAnswer: authedQuery
     .input(
