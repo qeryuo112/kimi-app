@@ -218,7 +218,7 @@ export const todoRouter = createRouter({
       z.object({
         id: z.number(),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
-        count: z.number().min(1).max(20).default(5),
+        count: z.number().min(1).max(100).default(5),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -432,7 +432,7 @@ export const todoRouter = createRouter({
         id: z.number(),
         urls: z.array(z.string().url()).min(1).max(5),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
-        count: z.number().min(1).max(20).default(5),
+        count: z.number().min(1).max(100).default(5),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1110,7 +1110,7 @@ export const todoRouter = createRouter({
       z.object({
         reviewId: z.number(),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
-        count: z.number().min(1).max(20).default(5),
+        count: z.number().min(1).max(100).default(5),
       })
     )
     .mutation(async ({ ctx, input }) => {

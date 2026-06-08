@@ -741,7 +741,7 @@ export default function Todos() {
                     <Input
                       type="number"
                       min={1}
-                      max={20}
+                      max={100}
                       value={testQuestionCount}
                       onChange={(e) => setTestQuestionCount(parseInt(e.target.value) || 5)}
                       className="flex-1"
@@ -1015,7 +1015,7 @@ export default function Todos() {
                     <Input
                       type="number"
                       min={1}
-                      max={20}
+                      max={100}
                       value={reviewTestQuestionCount}
                       onChange={(e) => setReviewTestQuestionCount(parseInt(e.target.value) || 5)}
                       className="flex-1"
