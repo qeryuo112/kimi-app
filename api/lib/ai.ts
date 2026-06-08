@@ -1156,7 +1156,8 @@ export async function generateQuestionsFromFileUrls(
 }`;
 
   // 构建多模态内容
-  const userPrompt = `请根据文件内容生成 ${count} 道 ${typeDesc}，难度要求 ${difficulty}/5。${customInstructions ? `\n\n【用户特殊要求】${customInstructions}` : ""}`;
+  const difficultyDesc = difficulty === 0 ? "混合难度，请生成覆盖简单到困难不同难度的题目" : `难度要求 ${difficulty}/5`;
+  const userPrompt = `请根据文件内容生成 ${count} 道 ${typeDesc}，${difficultyDesc}。${customInstructions ? `\n\n【用户特殊要求】${customInstructions}` : ""}`;
   const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
 
   const messages: KimiMessage[] = [
@@ -1254,7 +1255,7 @@ export async function generateQuestions(
 内容：
 ${knowledgeContent.slice(0, 6000)}
 
-难度要求：${difficulty}/5${customInstructions ? `\n\n【用户特殊要求】${customInstructions}` : ""}`;
+${difficulty === 0 ? "难度要求：混合难度，请生成覆盖简单到困难不同难度的题目" : `难度要求：${difficulty}/5`}${customInstructions ? `\n\n【用户特殊要求】${customInstructions}` : ""}`;
 
   const result = await chatWithAI(
     [

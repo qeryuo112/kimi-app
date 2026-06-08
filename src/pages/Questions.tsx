@@ -491,6 +491,7 @@ export default function Questions() {
   };
 
   const difficultyMap: Record<number, { label: string; color: string }> = {
+    0: { label: "混合难度", color: "bg-purple-500/20 text-purple-400" },
     1: { label: "简单", color: "bg-green-500/20 text-green-400" },
     2: { label: "较易", color: "bg-emerald-500/20 text-emerald-400" },
     3: { label: "中等", color: "bg-yellow-500/20 text-yellow-400" },
@@ -769,6 +770,7 @@ export default function Questions() {
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="0">混合难度</SelectItem>
                   <SelectItem value="1">简单</SelectItem>
                   <SelectItem value="2">较易</SelectItem>
                   <SelectItem value="3">中等</SelectItem>
