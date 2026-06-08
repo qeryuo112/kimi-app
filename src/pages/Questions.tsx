@@ -776,12 +776,12 @@ export default function Questions() {
               <div>
                 <label className="text-sm font-medium">科目</label>
                 <Select
-                  value={editForm.subjectId ? String(editForm.subjectId) : ""}
-                  onValueChange={(v) => setEditForm({ ...editForm, subjectId: v ? parseInt(v) : undefined })}
+                  value={editForm.subjectId ? String(editForm.subjectId) : "none"}
+                  onValueChange={(v) => setEditForm({ ...editForm, subjectId: v === "none" ? undefined : parseInt(v) })}
                 >
                   <SelectTrigger><SelectValue placeholder="选择科目" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">无</SelectItem>
+                    <SelectItem value="none">无</SelectItem>
                     {subjects?.map((s) => (
                       <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
                     ))}
@@ -791,12 +791,12 @@ export default function Questions() {
               <div>
                 <label className="text-sm font-medium">知识点</label>
                 <Select
-                  value={editForm.nodeId ? String(editForm.nodeId) : ""}
-                  onValueChange={(v) => setEditForm({ ...editForm, nodeId: v ? parseInt(v) : undefined })}
+                  value={editForm.nodeId ? String(editForm.nodeId) : "none"}
+                  onValueChange={(v) => setEditForm({ ...editForm, nodeId: v === "none" ? undefined : parseInt(v) })}
                 >
                   <SelectTrigger><SelectValue placeholder="选择知识点" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">无</SelectItem>
+                    <SelectItem value="none">无</SelectItem>
                     {knowledgeNodes?.map((n) => (
                       <SelectItem key={n.id} value={String(n.id)}>{n.title}</SelectItem>
                     ))}
@@ -806,12 +806,12 @@ export default function Questions() {
               <div>
                 <label className="text-sm font-medium">技能维度</label>
                 <Select
-                  value={editForm.skillId ? String(editForm.skillId) : ""}
-                  onValueChange={(v) => setEditForm({ ...editForm, skillId: v ? parseInt(v) : undefined })}
+                  value={editForm.skillId ? String(editForm.skillId) : "none"}
+                  onValueChange={(v) => setEditForm({ ...editForm, skillId: v === "none" ? undefined : parseInt(v) })}
                 >
                   <SelectTrigger><SelectValue placeholder="选择技能" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">无</SelectItem>
+                    <SelectItem value="none">无</SelectItem>
                     {skills?.map((s) => (
                       <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
                     ))}
