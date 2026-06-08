@@ -105,37 +105,43 @@ export const questionRouter = createRouter({
         .from(knowledgeNodes)
         .where(eq(knowledgeNodes.userId, ctx.user.id));
 
-      // 保存题目到数据库
+      // 保存题目到数据库（严格校验：标签必须来自已有科目/知识点）
       const savedQuestions = [];
       console.log("[question.aiGenerate] 开始保存题目", { count: result.questions.length, firstQuestion: result.questions[0] });
       for (const q of result.questions) {
-        // 尝试根据AI识别的学科和知识点匹配本地数据
+        // 尝试根据AI识别的学科和知识点匹配本地数据（精确匹配，不允许编造）
         let matchedSubjectId = input.subjectId;
         let matchedNodeId = input.nodeId;
+        let finalDetectedSubject: string | null = q.detectedSubject || null;
+        let finalDetectedKnowledgePoint: string | null = q.detectedKnowledgePoint || null;
 
         if (!matchedSubjectId && q.detectedSubject) {
-          // 尝试匹配学科名称（模糊匹配）
-          const matchedSubject = userSubjects.find(
-            s => s.title.toLowerCase().includes(q.detectedSubject!.toLowerCase()) ||
-                 q.detectedSubject!.toLowerCase().includes(s.title.toLowerCase())
-          );
+          const normalized = q.detectedSubject.trim().toLowerCase();
+          const matchedSubject = userSubjects.find(s => s.title.trim().toLowerCase() === normalized);
           if (matchedSubject) {
             matchedSubjectId = matchedSubject.id;
+            finalDetectedSubject = matchedSubject.title;
+          } else {
+            // 精确匹配失败，清空编造标签
+            finalDetectedSubject = null;
+            console.log("[question.aiGenerate] 学科标签不匹配，已清空", { detectedSubject: q.detectedSubject, availableSubjects: userSubjects.map(s => s.title) });
           }
         }
 
         if (!matchedNodeId && q.detectedKnowledgePoint) {
-          // 尝试匹配知识点名称（模糊匹配）
-          const matchedNode = userNodes.find(
-            n => n.title.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
-                 q.detectedKnowledgePoint!.toLowerCase().includes(n.title.toLowerCase())
-          );
+          const normalized = q.detectedKnowledgePoint.trim().toLowerCase();
+          const matchedNode = userNodes.find(n => n.title.trim().toLowerCase() === normalized);
           if (matchedNode) {
             matchedNodeId = matchedNode.id;
+            finalDetectedKnowledgePoint = matchedNode.title;
             // 如果匹配到知识点但没有匹配到学科，使用知识点的学科
             if (!matchedSubjectId) {
               matchedSubjectId = matchedNode.subjectId;
             }
+          } else {
+            // 精确匹配失败，清空编造标签
+            finalDetectedKnowledgePoint = null;
+            console.log("[question.aiGenerate] 知识点标签不匹配，已清空", { detectedKnowledgePoint: q.detectedKnowledgePoint, availableNodes: userNodes.map(n => n.title).slice(0, 20) });
           }
         }
 
@@ -152,8 +158,8 @@ export const questionRouter = createRouter({
           difficulty: q.difficulty,
           imageUrl: q.imageUrl || null,
           aiGenerated: true,
-          detectedSubject: q.detectedSubject || null,
-          detectedKnowledgePoint: q.detectedKnowledgePoint || null,
+          detectedSubject: finalDetectedSubject,
+          detectedKnowledgePoint: finalDetectedKnowledgePoint,
           smiles: (q as any).smiles || null,
           inchi: (q as any).inchi || null,
         };
@@ -234,33 +240,39 @@ export const questionRouter = createRouter({
         .from(knowledgeNodes)
         .where(eq(knowledgeNodes.userId, ctx.user.id));
 
-      // 保存题目到数据库
+      // 保存题目到数据库（严格校验：标签必须来自已有科目/知识点）
       const savedQuestions = [];
       for (const q of result.questions) {
-        // 尝试根据AI识别的学科和知识点匹配本地数据
+        // 尝试根据AI识别的学科和知识点匹配本地数据（精确匹配，不允许编造）
         let matchedSubjectId = input.subjectId;
         let matchedNodeId = input.nodeId;
+        let finalDetectedSubject: string | null = q.detectedSubject || null;
+        let finalDetectedKnowledgePoint: string | null = q.detectedKnowledgePoint || null;
 
         if (!matchedSubjectId && q.detectedSubject) {
-          const matchedSubject = userSubjects.find(
-            s => s.title.toLowerCase().includes(q.detectedSubject!.toLowerCase()) ||
-                 q.detectedSubject!.toLowerCase().includes(s.title.toLowerCase())
-          );
+          const normalized = q.detectedSubject.trim().toLowerCase();
+          const matchedSubject = userSubjects.find(s => s.title.trim().toLowerCase() === normalized);
           if (matchedSubject) {
             matchedSubjectId = matchedSubject.id;
+            finalDetectedSubject = matchedSubject.title;
+          } else {
+            finalDetectedSubject = null;
+            console.log("[question.aiGenerateFromUrls] 学科标签不匹配，已清空", { detectedSubject: q.detectedSubject });
           }
         }
 
         if (!matchedNodeId && q.detectedKnowledgePoint) {
-          const matchedNode = userNodes.find(
-            n => n.title.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
-                 q.detectedKnowledgePoint!.toLowerCase().includes(n.title.toLowerCase())
-          );
+          const normalized = q.detectedKnowledgePoint.trim().toLowerCase();
+          const matchedNode = userNodes.find(n => n.title.trim().toLowerCase() === normalized);
           if (matchedNode) {
             matchedNodeId = matchedNode.id;
+            finalDetectedKnowledgePoint = matchedNode.title;
             if (!matchedSubjectId) {
               matchedSubjectId = matchedNode.subjectId;
             }
+          } else {
+            finalDetectedKnowledgePoint = null;
+            console.log("[question.aiGenerateFromUrls] 知识点标签不匹配，已清空", { detectedKnowledgePoint: q.detectedKnowledgePoint });
           }
         }
 
@@ -279,8 +291,8 @@ export const questionRouter = createRouter({
             difficulty: q.difficulty,
             imageUrl: q.imageUrl || null,
             aiGenerated: true,
-            detectedSubject: q.detectedSubject || null,
-            detectedKnowledgePoint: q.detectedKnowledgePoint || null,
+            detectedSubject: finalDetectedSubject,
+            detectedKnowledgePoint: finalDetectedKnowledgePoint,
           })
           .$returningId();
 
@@ -401,6 +413,18 @@ export const questionRouter = createRouter({
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
       console.log("[question.update] 开始", { questionId: input.id, userId: ctx.user.id });
+      console.log("[question.update] input 详情", {
+        contentLength: input.content?.length,
+        optionsLength: input.options?.length,
+        optionsPreview: input.options?.slice(0, 200),
+        correctAnswerLength: input.correctAnswer?.length,
+        explanationLength: input.explanation?.length,
+        difficulty: input.difficulty,
+        imageUrl: input.imageUrl,
+        subjectId: input.subjectId,
+        nodeId: input.nodeId,
+        skillId: input.skillId,
+      });
 
       // 查询现有题目
       const [existing] = await db
@@ -430,6 +454,12 @@ export const questionRouter = createRouter({
       if (input.subjectId !== undefined) updateData.subjectId = input.subjectId;
       if (input.nodeId !== undefined) updateData.nodeId = input.nodeId;
       if (input.skillId !== undefined) updateData.skillId = input.skillId;
+
+      console.log("[question.update] updateData 构建完成", {
+        keys: Object.keys(updateData),
+        optionsLength: updateData.options?.length,
+        optionsPreview: updateData.options?.slice(0, 200),
+      });
 
       // 合并后的题目数据（用于判断是否需要AI重生成）
       const mergedContent = input.content !== undefined ? input.content : existing.content;
@@ -539,12 +569,22 @@ export const questionRouter = createRouter({
 
       console.log("[question.update] 最终更新数据", { keys: Object.keys(updateData) });
 
-      await db
-        .update(questions)
-        .set(updateData)
-        .where(and(eq(questions.id, input.id), eq(questions.userId, ctx.user.id)));
-
-      console.log("[question.update] 数据库更新完成");
+      try {
+        await db
+          .update(questions)
+          .set(updateData)
+          .where(and(eq(questions.id, input.id), eq(questions.userId, ctx.user.id)));
+        console.log("[question.update] 数据库更新完成");
+      } catch (dbErr: any) {
+        console.error("[question.update] 数据库更新失败", {
+          message: dbErr?.message,
+          code: dbErr?.code,
+          sqlState: dbErr?.sqlState,
+          stack: dbErr?.stack,
+          updateDataKeys: Object.keys(updateData),
+        });
+        throw new Error(`保存失败: ${dbErr?.message || "数据库错误"}`);
+      }
 
       // 查询更新后的题目返回
       const [updated] = await db
