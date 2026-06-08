@@ -1096,7 +1096,8 @@ export async function generateQuestionsFromFileUrls(
   apiKey?: string,
   apiUrl?: string,
   modelName?: string,
-  requireChemicalStructure = false
+  requireChemicalStructure = false,
+  customInstructions?: string
 ): Promise<{
   questions: Array<{
     content: string;
@@ -1155,7 +1156,7 @@ export async function generateQuestionsFromFileUrls(
 }`;
 
   // 构建多模态内容
-  const userPrompt = `请根据文件内容生成 ${count} 道 ${typeDesc}，难度要求 ${difficulty}/5。`;
+  const userPrompt = `请根据文件内容生成 ${count} 道 ${typeDesc}，难度要求 ${difficulty}/5。${customInstructions ? `\n\n【用户特殊要求】${customInstructions}` : ""}`;
   const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
 
   const messages: KimiMessage[] = [
@@ -1186,7 +1187,8 @@ export async function generateQuestions(
   apiKey?: string,
   apiUrl?: string,
   modelName?: string,
-  requireChemicalStructure = false
+  requireChemicalStructure = false,
+  customInstructions?: string
 ): Promise<{
   questions: Array<{
     content: string;
@@ -1252,7 +1254,7 @@ export async function generateQuestions(
 内容：
 ${knowledgeContent.slice(0, 6000)}
 
-难度要求：${difficulty}/5`;
+难度要求：${difficulty}/5${customInstructions ? `\n\n【用户特殊要求】${customInstructions}` : ""}`;
 
   const result = await chatWithAI(
     [

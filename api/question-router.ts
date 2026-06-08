@@ -201,6 +201,7 @@ export const questionRouter = createRouter({
         nodeId: z.number().optional(),
         skillId: z.number().optional(),
         requireChemicalStructure: z.boolean().optional(),
+        customInstructions: z.string().max(500).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -218,7 +219,8 @@ export const questionRouter = createRouter({
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined,
-        input.requireChemicalStructure || false
+        input.requireChemicalStructure || false,
+        input.customInstructions
       );
 
       // 获取用户的学科和知识点列表，用于AI识别匹配

@@ -60,6 +60,7 @@ export default function Questions() {
     count: 5,
     difficulty: 3,
     requireChemicalStructure: false,
+    customInstructions: "",
   });
 
   // AI出题模式切换：text | file
@@ -372,6 +373,7 @@ export default function Questions() {
         count: genForm.count,
         difficulty: genForm.difficulty,
         requireChemicalStructure: genForm.requireChemicalStructure,
+        customInstructions: genForm.customInstructions,
       });
     }
   };
@@ -1106,6 +1108,16 @@ export default function Questions() {
                 )}
               </>
             )}
+
+            <div>
+              <label className="text-sm font-medium">出题要求（可选）</label>
+              <Textarea
+                placeholder="如：偏向考研真题风格、注重计算能力、增加案例分析题、只出选择题..."
+                value={genForm.customInstructions}
+                onChange={(e) => setGenForm({ ...genForm, customInstructions: e.target.value })}
+                className="min-h-[60px]"
+              />
+            </div>
 
             <div className="grid grid-cols-3 gap-3">
               <div>
