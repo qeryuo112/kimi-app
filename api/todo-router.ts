@@ -117,39 +117,6 @@ export const todoRouter = createRouter({
           .$returningId();
         created.push(id);
 
-        // 为新知识点创建复习调度
-        const nodes = item.knowledgeNodes || [];
-        for (const node of nodes) {
-          const existingReview = await db
-            .select()
-            .from(reviewSchedules)
-            .where(
-              and(
-                eq(reviewSchedules.userId, ctx.user.id),
-                eq(reviewSchedules.planId, input.planId),
-                eq(reviewSchedules.nodeTitle, node)
-              )
-            );
-
-          if (existingReview.length === 0) {
-            // 首次学习，安排第一次复习（1天后）
-            const nextDate = new Date(today);
-            nextDate.setDate(nextDate.getDate() + 1);
-            await db.insert(reviewSchedules).values({
-              userId: ctx.user.id,
-              planId: input.planId,
-              nodeTitle: node,
-              subjectTitle: item.subject || "",
-              originalStudyDate: today,
-              reviewDates: JSON.stringify([]),
-              nextReviewDate: nextDate.toISOString().split("T")[0],
-              intervalDays: 1,
-              reviewCount: 0,
-              mastery: 0,
-              status: "active",
-            });
-          }
-        }
       }
 
       // 插入今日复习任务（作为todo）
@@ -866,7 +833,7 @@ export const todoRouter = createRouter({
           .where(eq(skillDimensions.id, skill.id));
       }
 
-      // 7. 更新复习调度
+      // 7. 更新/创建复习调度（仅在任务完成后创建，未完成的任务不进入复习调度）
       for (const node of nodes) {
         const [rev] = await db
           .select()
@@ -880,6 +847,7 @@ export const todoRouter = createRouter({
           );
 
         if (rev) {
+          // 已有复习调度，更新
           const newInterval = calculateNextInterval(rev.intervalDays, mastery);
           const nextDate = new Date();
           nextDate.setDate(nextDate.getDate() + newInterval);
@@ -903,6 +871,23 @@ export const todoRouter = createRouter({
               status: mastery >= 95 && rev.reviewCount >= 2 ? "mastered" : "active",
             })
             .where(eq(reviewSchedules.id, rev.id));
+        } else {
+          // 首次完成学习，创建复习调度
+          const nextDate = new Date();
+          nextDate.setDate(nextDate.getDate() + 1);
+          await db.insert(reviewSchedules).values({
+            userId: ctx.user.id,
+            planId: todo.planId,
+            nodeTitle: node,
+            subjectTitle: todo.subject,
+            originalStudyDate: today,
+            reviewDates: JSON.stringify([today]),
+            nextReviewDate: nextDate.toISOString().split("T")[0],
+            intervalDays: 1,
+            reviewCount: 1,
+            mastery: mastery,
+            status: "active",
+          });
         }
       }
 
