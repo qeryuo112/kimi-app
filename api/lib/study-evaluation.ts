@@ -12,6 +12,7 @@ import {
 } from "@db/schema";
 import { eq, and } from "drizzle-orm";
 import { evaluateTodoTestAnswers } from "./ai";
+import { formatLocalDate } from "./date-utils";
 
 // ========== 调试日志 ==========
 function debugLog(label: string, data?: unknown) {
@@ -367,7 +368,7 @@ export async function upsertReviewSchedule(
   mastery: number
 ) {
   const db = getDb();
-  const today = new Date().toISOString().split("T")[0];
+  const today = formatLocalDate();
 
   const conditions: any[] = [
     eq(reviewSchedules.userId, userId),
@@ -400,7 +401,7 @@ export async function upsertReviewSchedule(
       .update(reviewSchedules)
       .set({
         reviewCount: existing.reviewCount + 1,
-        nextReviewDate: nextDate.toISOString().split("T")[0],
+        nextReviewDate: formatLocalDate(nextDate),
         intervalDays: newInterval,
         mastery: Math.max(existing.mastery, mastery),
         reviewDates: JSON.stringify([...existingDates, today]),
@@ -418,7 +419,7 @@ export async function upsertReviewSchedule(
       subjectTitle,
       originalStudyDate: today,
       reviewDates: JSON.stringify([]),
-      nextReviewDate: nextDate.toISOString().split("T")[0],
+      nextReviewDate: formatLocalDate(nextDate),
       intervalDays: 1,
       reviewCount: 0,
       mastery,

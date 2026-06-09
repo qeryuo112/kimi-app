@@ -39,6 +39,7 @@ import {
 } from "@db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills, generateCompleteStudyPlanFromFile, generateRoundAndMonthlyPlanFromFile, generateWeeklyPlanFromFile, generateMonthlyWeeklyPlanFromFile, generateDailyPlanFromFile, generateWeeklyDailyPlanFromFile, generateWeeklyReviewQuestions, evaluateWeeklyReview } from "./lib/ai";
+import { formatLocalDate } from "./lib/date-utils";
 
 // ========== 辅助函数：收集计划科目数据并上传到文件服务器 ==========
 
@@ -736,9 +737,7 @@ export const planRouter = createRouter({
         .from(userSettings)
         .where(eq(userSettings.userId, ctx.user.id));
 
-      const startDate = plan.startDate
-        ? new Date(plan.startDate).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0];
+      const startDate = formatLocalDate(plan.startDate);
 
       // 使用用户设定的参数
       const totalMonths = plan.totalMonths || 3;
@@ -857,7 +856,7 @@ export const planRouter = createRouter({
       if (!plan) throw new Error("计划不存在");
 
       const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
-      const startDate = plan.startDate ? new Date(plan.startDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+      const startDate = formatLocalDate(plan.startDate);
       const totalMonths = plan.totalMonths || 3;
       const reviewRounds = plan.reviewRounds || 3;
 
@@ -914,7 +913,7 @@ export const planRouter = createRouter({
       }
 
       const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
-      const startDate = plan.startDate ? new Date(plan.startDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+      const startDate = formatLocalDate(plan.startDate);
       const totalMonths = plan.totalMonths || 3;
       const totalWeeks = Math.ceil(totalMonths * 4.3);
 
@@ -992,9 +991,7 @@ export const planRouter = createRouter({
         throw new Error(`第${input.monthNumber}月的周计划已生成`);
       }
 
-      const startDate = plan.startDate
-        ? new Date(plan.startDate).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0];
+      const startDate = formatLocalDate(plan.startDate);
       const totalMonths = plan.totalMonths || 3;
       const totalWeeks = Math.ceil(totalMonths * 4.3);
       const weeksPerMonth = Math.round(totalWeeks / totalMonths);
@@ -1107,7 +1104,7 @@ export const planRouter = createRouter({
       if (!plan) throw new Error("计划不存在");
 
       const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
-      const startDate = plan.startDate ? new Date(plan.startDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+      const startDate = formatLocalDate(plan.startDate);
       const totalMonths = plan.totalMonths || 3;
       const reviewRounds = plan.reviewRounds || 3;
 
@@ -1155,7 +1152,7 @@ export const planRouter = createRouter({
       }
 
       const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
-      const startDate = plan.startDate ? new Date(plan.startDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+      const startDate = formatLocalDate(plan.startDate);
       const totalMonths = plan.totalMonths || 3;
       const totalWeeks = Math.ceil(totalMonths * 4.3);
 
@@ -1243,9 +1240,7 @@ export const planRouter = createRouter({
         .from(userSettings)
         .where(eq(userSettings.userId, ctx.user.id));
 
-      const startDate = plan.startDate
-        ? new Date(plan.startDate).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0];
+      const startDate = formatLocalDate(plan.startDate);
 
       // 获取科目数据
       const ps = await db
@@ -1557,8 +1552,8 @@ export const planRouter = createRouter({
           userId: ctx.user.id,
           planId: input.planId,
           weekNumber: input.weekNumber,
-          weekStartDate: weekStart.toISOString().split("T")[0],
-          weekEndDate: weekEnd.toISOString().split("T")[0],
+          weekStartDate: formatLocalDate(weekStart),
+          weekEndDate: formatLocalDate(weekEnd),
           questionIds: JSON.stringify(savedQuestionIds),
           knowledgeSummary: reviewResult.knowledgeSummary,
           totalQuestions: savedQuestionIds.length,

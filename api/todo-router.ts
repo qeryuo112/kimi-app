@@ -16,6 +16,7 @@ import {
 } from "@db/schema";
 import { eq, and, or, lte, lt, desc, inArray } from "drizzle-orm";
 import { generateTodoTestQuestions, generateTodoTestFromFiles, evaluateTodoTestAnswers } from "./lib/ai";
+import { formatLocalDate } from "./lib/date-utils";
 
 // 根据掌握度计算下一次复习间隔（间隔重复算法）
 function calculateNextInterval(currentInterval: number, mastery: number): number {
@@ -57,7 +58,9 @@ export const todoRouter = createRouter({
     .input(z.object({ planId: z.number(), date: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const targetDate = input.date || new Date().toISOString().split("T")[0];
+      const targetDate = input.date || formatLocalDate();
+
+      console.log("[DEBUG generateTodayTodos] START", { targetDate, planId: input.planId, userId: ctx.user.id });
 
       // 检查该日期是否已生成过
       const existing = await db
@@ -71,6 +74,8 @@ export const todoRouter = createRouter({
           )
         );
 
+      console.log("[DEBUG generateTodayTodos] existing check", { targetDate, existingCount: existing.length });
+
       if (existing.length > 0) {
         return { generated: false, message: `${targetDate} 任务已生成`, count: existing.length };
       }
@@ -82,33 +87,42 @@ export const todoRouter = createRouter({
         .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
 
       if (!plan || !plan.aiPlan) {
+        console.log("[DEBUG generateTodayTodos] no plan or aiPlan", { hasPlan: !!plan, hasAiPlan: !!plan?.aiPlan });
         throw new Error("计划不存在或未生成复习计划");
       }
 
+      console.log("[DEBUG generateTodayTodos] plan fetched", { planId: plan.id, startDateRaw: plan.startDate });
+
       let dailyPlan: any[] = [];
+      let parsedAiPlan: any = {};
       try {
-        const parsed = JSON.parse(plan.aiPlan);
-        dailyPlan = parsed.dailyPlan || [];
-      } catch {
+        parsedAiPlan = JSON.parse(plan.aiPlan);
+        dailyPlan = parsedAiPlan.dailyPlan || [];
+      } catch (e) {
+        console.log("[DEBUG generateTodayTodos] aiPlan parse error", { aiPlanPreview: plan.aiPlan?.slice(0, 200) });
         throw new Error("计划数据格式错误");
       }
+
+      console.log("[DEBUG generateTodayTodos] dailyPlan info", { dailyPlanLength: dailyPlan.length, allDays: dailyPlan.map((d: any) => d.day), generatedWeeks: parsedAiPlan.generatedWeeks });
 
       if (dailyPlan.length === 0) {
         throw new Error("计划中没有日计划数据");
       }
 
       // 计算目标日期是第几天（从开始日期算起）
-      const startDate = plan.startDate
-        ? new Date(plan.startDate).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0];
+      const startDate = formatLocalDate(plan.startDate);
 
       const start = new Date(startDate);
       const target = new Date(targetDate);
       const dayDiff = Math.floor((target.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
       const targetDayIndex = dayDiff + 1;
 
+      console.log("[DEBUG generateTodayTodos] day calculation", { startDate, targetDate, startTs: start.getTime(), targetTs: target.getTime(), dayDiff, targetDayIndex });
+
       // 找到目标日期的计划项
       const targetItems = dailyPlan.filter((d: any) => d.day === targetDayIndex);
+
+      console.log("[DEBUG generateTodayTodos] targetItems", { targetDayIndex, targetItemsCount: targetItems.length, targetItemsSubjects: targetItems.map((d: any) => d.subject) });
 
       // 同时查找复习调度中目标日期需要复习的内容
       const targetReviews = await db
@@ -123,10 +137,13 @@ export const todoRouter = createRouter({
           )
         );
 
+      console.log("[DEBUG generateTodayTodos] targetReviews", { targetDate, targetReviewsCount: targetReviews.length });
+
       const created = [];
 
       // 插入目标日期新学任务
       for (const item of targetItems) {
+        console.log("[DEBUG generateTodayTodos] inserting new task", { subject: item.subject, day: item.day });
         const [{ id }] = await db
           .insert(dailyTodos)
           .values({
@@ -147,6 +164,7 @@ export const todoRouter = createRouter({
 
       // 插入目标日期复习任务（作为todo）
       for (const rev of targetReviews) {
+        console.log("[DEBUG generateTodayTodos] inserting review task", { subject: rev.subjectTitle });
         const [{ id }] = await db
           .insert(dailyTodos)
           .values({
@@ -164,6 +182,8 @@ export const todoRouter = createRouter({
         created.push(id);
       }
 
+      console.log("[DEBUG generateTodayTodos] END", { targetDate, createdCount: created.length, createdIds: created });
+
       return { generated: true, count: created.length, date: targetDate };
     }),
 
@@ -171,7 +191,9 @@ export const todoRouter = createRouter({
   // 包含今天的所有任务 + 历史日期未完成的 pending 任务（自动顺延）
   getToday: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
-    const today = new Date().toISOString().split("T")[0];
+    const today = formatLocalDate();
+
+    console.log("[DEBUG getToday] query", { today, userId: ctx.user.id });
 
     const todos = await db
       .select()
@@ -186,6 +208,8 @@ export const todoRouter = createRouter({
         )
       )
       .orderBy(dailyTodos.status);
+
+    console.log("[DEBUG getToday] result", { today, todosCount: todos.length, dates: todos.map(t => t.date) });
 
     const completedCount = todos.filter((t) => t.status === "completed").length;
     const totalCount = todos.length;
@@ -219,7 +243,7 @@ export const todoRouter = createRouter({
     )
     .query(async ({ ctx, input }) => {
       const db = getDb();
-      const targetDate = input?.date || new Date().toISOString().split("T")[0];
+      const targetDate = input?.date || formatLocalDate();
 
       const conditions = [
         eq(reviewSchedules.userId, ctx.user.id),
@@ -576,7 +600,7 @@ export const todoRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const today = new Date().toISOString().split("T")[0];
+      const today = formatLocalDate();
 
       const [todo] = await db
         .select()
@@ -920,10 +944,10 @@ export const todoRouter = createRouter({
             .update(reviewSchedules)
             .set({
               reviewCount: rev.reviewCount + 1,
-              nextReviewDate: nextDate.toISOString().split("T")[0],
+              nextReviewDate: formatLocalDate(nextDate),
               intervalDays: newInterval,
               mastery: Math.max(rev.mastery, mastery),
-              reviewDates: JSON.stringify([...existingDates, new Date().toISOString().split("T")[0]]),
+              reviewDates: JSON.stringify([...existingDates, formatLocalDate()]),
               status: mastery >= 95 && rev.reviewCount >= 2 ? "mastered" : "active",
             })
             .where(eq(reviewSchedules.id, rev.id));
@@ -938,7 +962,7 @@ export const todoRouter = createRouter({
             subjectTitle: todo.subject,
             originalStudyDate: today,
             reviewDates: JSON.stringify([today]),
-            nextReviewDate: nextDate.toISOString().split("T")[0],
+            nextReviewDate: formatLocalDate(nextDate),
             intervalDays: 1,
             reviewCount: 1,
             mastery: mastery,
@@ -1604,10 +1628,10 @@ export const todoRouter = createRouter({
         .update(reviewSchedules)
         .set({
           reviewCount: review.reviewCount + 1,
-          nextReviewDate: nextDate.toISOString().split("T")[0],
+          nextReviewDate: formatLocalDate(nextDate),
           intervalDays: newInterval,
           mastery: finalMastery,
-          reviewDates: JSON.stringify([...existingDates, new Date().toISOString().split("T")[0]]),
+          reviewDates: JSON.stringify([...existingDates, formatLocalDate()]),
           status: finalMastery >= 95 && review.reviewCount >= 2 ? "mastered" : "active",
           snapshot: JSON.stringify(testDetails),
         })

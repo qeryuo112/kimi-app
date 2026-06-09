@@ -4,6 +4,7 @@ import { getDb } from "./queries/connection";
 import { studyLogs, studyStats, knowledgeNodes, subjects, userSettings, questions, skillDimensions, reviewSchedules, wrongAnswers } from "@db/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { evaluateStudyLogQuality, generateStudyLogTests, generateTodoTestQuestions, generateTodoTestFromFiles } from "./lib/ai";
+import { formatLocalDate } from "./lib/date-utils";
 import {
   matchQuestionsFromBank,
   evaluateMixedTestAnswers,
@@ -72,7 +73,7 @@ export const studyRouter = createRouter({
         .$returningId();
 
       // 更新统计
-      const dateStr = logDate.toISOString().split("T")[0];
+      const dateStr = formatLocalDate(logDate);
       const existingStats = await getDb()
         .select()
         .from(studyStats)
@@ -197,7 +198,7 @@ export const studyRouter = createRouter({
       if (!log) throw new Error("记录不存在");
 
       // 回退当日学习统计（无论有无快照都要执行）
-      const logDate = new Date(log.date).toISOString().split("T")[0];
+      const logDate = formatLocalDate(log.date);
       const existingStats = await db
         .select()
         .from(studyStats)
@@ -303,7 +304,7 @@ export const studyRouter = createRouter({
 
       const conditions = [
         eq(studyStats.userId, ctx.user.id),
-        gte(studyStats.statDate, startDate.toISOString().split("T")[0]),
+        gte(studyStats.statDate, formatLocalDate(startDate)),
       ];
 
       if (input?.subjectId) {
@@ -590,7 +591,7 @@ export const studyRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const today = new Date().toISOString().split("T")[0];
+      const today = formatLocalDate();
 
       console.log("[submitStudyTest] 开始", {
         userId: ctx.user.id,
