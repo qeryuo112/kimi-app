@@ -75,6 +75,7 @@ export default function Todos() {
   const [reviewTestResult, setReviewTestResult] = useState<any>(null);
   const [reviewTestQuestionType, setReviewTestQuestionType] = useState<"single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed">("mixed");
   const [reviewTestQuestionCount, setReviewTestQuestionCount] = useState(5);
+  const [isReviewResuming, setIsReviewResuming] = useState(false);
 
   // 复习详情查看状态
   const [reviewDetailOpen, setReviewDetailOpen] = useState(false);
@@ -107,23 +108,58 @@ export default function Todos() {
     }
   }, []);
 
+  // 从 localStorage 恢复缓存的复习测试
+  useEffect(() => {
+    const cached = localStorage.getItem("ai-review-cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed.questions && parsed.questions.length > 0 && Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
+          setIsReviewResuming(true);
+        }
+      } catch {
+        // 忽略解析错误
+      }
+    }
+  }, []);
+
   // 保存题目到 localStorage
   useEffect(() => {
     if (testQuestions.length > 0 && testStep === "testing") {
       const cache = {
         questions: testQuestions,
         answers: testAnswers,
+        answerImages: testAnswerImages,
         todoId: activeTodoId,
         timestamp: Date.now(),
       };
       localStorage.setItem("ai-exam-cache", JSON.stringify(cache));
     }
-  }, [testQuestions, testAnswers, testStep, activeTodoId]);
+  }, [testQuestions, testAnswers, testAnswerImages, testStep, activeTodoId]);
+
+  // 保存复习测试到 localStorage
+  useEffect(() => {
+    if (reviewTestQuestions.length > 0 && reviewTestStep === "testing") {
+      const cache = {
+        questions: reviewTestQuestions,
+        answers: reviewTestAnswers,
+        answerImages: reviewTestAnswerImages,
+        reviewId: activeReviewId,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem("ai-review-cache", JSON.stringify(cache));
+    }
+  }, [reviewTestQuestions, reviewTestAnswers, reviewTestAnswerImages, reviewTestStep, activeReviewId]);
 
   // 清除缓存
   const clearCache = () => {
     localStorage.removeItem("ai-exam-cache");
     setIsResuming(false);
+  };
+
+  const clearReviewCache = () => {
+    localStorage.removeItem("ai-review-cache");
+    setIsReviewResuming(false);
   };
 
   const generateTest = trpc.todo.generateTest.useMutation({
@@ -275,11 +311,29 @@ export default function Todos() {
         const parsed = JSON.parse(cached);
         setTestQuestions(parsed.questions);
         setTestAnswers(parsed.answers || {});
-        setTestAnswerImages({});
+        setTestAnswerImages(parsed.answerImages || {});
         setActiveTodoId(parsed.todoId);
         setTestStep("testing");
         setTestOpen(true);
         setIsResuming(false);
+      } catch {
+        toast.error("恢复失败");
+      }
+    }
+  };
+
+  const handleResumeReviewTest = () => {
+    const cached = localStorage.getItem("ai-review-cache");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        setReviewTestQuestions(parsed.questions);
+        setReviewTestAnswers(parsed.answers || {});
+        setReviewTestAnswerImages(parsed.answerImages || {});
+        setActiveReviewId(parsed.reviewId);
+        setReviewTestStep("testing");
+        setReviewTestOpen(true);
+        setIsReviewResuming(false);
       } catch {
         toast.error("恢复失败");
       }
@@ -644,6 +698,23 @@ export default function Todos() {
                       <Button
                         size="sm"
                         onClick={() => {
+                          const cached = localStorage.getItem("ai-review-cache");
+                          if (cached) {
+                            try {
+                              const parsed = JSON.parse(cached);
+                              if (parsed.reviewId === rev.id && Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
+                                setReviewTestQuestions(parsed.questions);
+                                setReviewTestAnswers(parsed.answers || {});
+                                setReviewTestAnswerImages(parsed.answerImages || {});
+                                setActiveReviewId(rev.id);
+                                setReviewTestStep("testing");
+                                setReviewTestOpen(true);
+                                return;
+                              }
+                            } catch {
+                              // ignore
+                            }
+                          }
                           setActiveReviewId(rev.id);
                           setReviewTestStep("select-source");
                           setReviewTestOpen(true);
@@ -1087,7 +1158,10 @@ export default function Todos() {
       </Dialog>
 
       {/* 复习任务AI考官弹窗 */}
-      <Dialog open={reviewTestOpen} onOpenChange={setReviewTestOpen}>
+      <Dialog open={reviewTestOpen} onOpenChange={(open) => {
+        if (!open) clearReviewCache();
+        setReviewTestOpen(open);
+      }}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">

@@ -348,6 +348,7 @@ export const wrongAnswers = mysqlTable("wrong_answers", {
   questionId: bigint("questionId", { mode: "number", unsigned: true }).notNull(),
   userAnswer: text("userAnswer").notNull(),
   imageUrls: text("imageUrls"), // 用户上传的图片URL列表(JSON数组)
+  questionContent: text("questionContent"), // 题目内容文本（用于错题本展示和查重）
   wrongCount: int("wrongCount").default(1).notNull(), // 错误次数
   lastWrongAt: timestamp("lastWrongAt").defaultNow().notNull(),
   mastered: boolean("mastered").default(false).notNull(), // 是否已掌握
