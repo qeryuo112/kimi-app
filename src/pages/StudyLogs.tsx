@@ -184,6 +184,8 @@ export default function StudyLogs() {
   });
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLog, setDetailLog] = useState<any>(null);
   const [evaluatingId, setEvaluatingId] = useState<number | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
@@ -616,6 +618,18 @@ export default function StudyLogs() {
                           <h3 className="text-sm font-medium truncate">{log.title}</h3>
                           <div className="flex items-center gap-1">
                             <span className={`text-xs ${mood.color}`}>{mood.icon}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => {
+                                setDetailLog(log);
+                                setDetailOpen(true);
+                              }}
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              详情
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1069,6 +1083,65 @@ export default function StudyLogs() {
               }}>
                 完成
               </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 学习记录详情 */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>学习记录详情</DialogTitle>
+          </DialogHeader>
+          {detailLog && (
+            <div className="space-y-4 py-2">
+              <div>
+                <label className="text-sm font-medium">主题</label>
+                <p className="text-sm">{detailLog.title}</p>
+              </div>
+              {detailLog.content && (
+                <div>
+                  <label className="text-sm font-medium">内容</label>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{detailLog.content}</p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">时长</label>
+                  <p className="text-sm">{detailLog.duration} 分钟</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">日期</label>
+                  <p className="text-sm">{new Date(detailLog.date).toLocaleString("zh-CN")}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">质量</label>
+                  <p className="text-sm">{"★".repeat(detailLog.quality)}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">心情</label>
+                  <p className="text-sm">{moodIcons[detailLog.mood || "normal"].icon}</p>
+                </div>
+              </div>
+              {detailLog.tags && (
+                <div>
+                  <label className="text-sm font-medium">标签</label>
+                  <p className="text-sm text-muted-foreground">{detailLog.tags}</p>
+                </div>
+              )}
+              {detailLog.aiFeedback && (
+                <div>
+                  <label className="text-sm font-medium">AI 评估</label>
+                  <p className="text-sm text-primary/80 bg-primary/5 p-2 rounded">{detailLog.aiFeedback}</p>
+                </div>
+              )}
+              {detailLog.aiTestScore !== null && detailLog.aiTestScore !== undefined && (
+                <div>
+                  <label className="text-sm font-medium">AI 测试分数</label>
+                  <p className="text-sm">{detailLog.aiTestScore} 分</p>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

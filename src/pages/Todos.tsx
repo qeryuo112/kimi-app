@@ -76,6 +76,8 @@ export default function Todos() {
   const [reviewTestQuestionType, setReviewTestQuestionType] = useState<"single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed">("mixed");
   const [reviewTestQuestionCount, setReviewTestQuestionCount] = useState(5);
   const [isReviewResuming, setIsReviewResuming] = useState(false);
+  const [historyDetailOpen, setHistoryDetailOpen] = useState(false);
+  const [historyDetail, setHistoryDetail] = useState<any>(null);
 
   // 复习详情查看状态
   const [reviewDetailOpen, setReviewDetailOpen] = useState(false);
@@ -746,6 +748,17 @@ export default function Todos() {
                       {statusBadge(h.status)}
                     </div>
                     <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-1.5 text-muted-foreground hover:text-primary"
+                        onClick={() => {
+                          setHistoryDetail(h);
+                          setHistoryDetailOpen(true);
+                        }}
+                      >
+                        <FileText className="h-3 w-3" />
+                      </Button>
                       <span className="text-xs text-muted-foreground">{h.date}</span>
                       {h.status === "completed" && (
                         <Button
@@ -1563,6 +1576,70 @@ export default function Todos() {
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <p>暂无详细测试记录</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 历史记录详情 */}
+      <Dialog open={historyDetailOpen} onOpenChange={setHistoryDetailOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>任务详情</DialogTitle>
+          </DialogHeader>
+          {historyDetail && (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center gap-2">
+                {statusIcon(historyDetail.status)}
+                <span className="font-medium">{historyDetail.subject}</span>
+                {statusBadge(historyDetail.status)}
+              </div>
+              <div>
+                <label className="text-sm font-medium">日期</label>
+                <p className="text-sm">{historyDetail.date}</p>
+              </div>
+              {historyDetail.focus && (
+                <div>
+                  <label className="text-sm font-medium">学习目标</label>
+                  <p className="text-sm text-muted-foreground">{historyDetail.focus}</p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">预计时长</label>
+                  <p className="text-sm">{historyDetail.estimatedMinutes} 分钟</p>
+                </div>
+                {historyDetail.actualMinutes && (
+                  <div>
+                    <label className="text-sm font-medium">实际时长</label>
+                    <p className="text-sm">{historyDetail.actualMinutes} 分钟</p>
+                  </div>
+                )}
+              </div>
+              {historyDetail.knowledgeNodes && (
+                <div>
+                  <label className="text-sm font-medium">知识点</label>
+                  <p className="text-sm text-muted-foreground">{(() => { try { return JSON.parse(historyDetail.knowledgeNodes).join("、"); } catch { return historyDetail.knowledgeNodes; } })()}</p>
+                </div>
+              )}
+              {historyDetail.aiMastery !== null && historyDetail.aiMastery > 0 && (
+                <div>
+                  <label className="text-sm font-medium">掌握度</label>
+                  <p className="text-sm">{historyDetail.aiMastery}%</p>
+                </div>
+              )}
+              {historyDetail.aiEvaluation && (
+                <div>
+                  <label className="text-sm font-medium">AI 评估</label>
+                  <p className="text-sm text-primary/80 bg-primary/5 p-2 rounded">{historyDetail.aiEvaluation}</p>
+                </div>
+              )}
+              {historyDetail.snapshot && (
+                <div>
+                  <label className="text-sm font-medium">测试快照</label>
+                  <pre className="text-xs text-muted-foreground bg-secondary/30 p-2 rounded overflow-auto max-h-40">{historyDetail.snapshot}</pre>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
