@@ -851,10 +851,21 @@ export const questionRouter = createRouter({
 
       const qMap = new Map(qs.map((q) => [q.id, q]));
 
-      return wrongs.map((w) => ({
-        ...w,
-        question: qMap.get(w.questionId) || null,
-      }));
+      return wrongs.map((w) => {
+        const q = qMap.get(w.questionId);
+        return {
+          ...w,
+          question: q || {
+            id: w.questionId,
+            content: w.questionContent || "（题目内容缺失）",
+            correctAnswer: w.correctAnswer || "",
+            explanation: "",
+            questionType: "fill_blank",
+            options: w.options ? JSON.parse(w.options) : [],
+            difficulty: 3,
+          },
+        };
+      });
     }),
 
   // 标记错题为已掌握

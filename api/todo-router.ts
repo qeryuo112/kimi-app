@@ -1033,12 +1033,13 @@ export const todoRouter = createRouter({
               const insertValues: any = {
                 userId: ctx.user.id,
                 questionContent: q.content,
+                correctAnswer: q.correctAnswer,
+                options: q.options ? JSON.stringify(q.options) : null,
                 userAnswer: ans.userAnswer,
                 wrongCount: 1,
                 lastWrongAt: new Date(),
                 mastered: false,
               };
-              // 如果 q.id 存在，尝试存入 questionId（但 schema 中它是 notNull，可能缺失时导致问题）
               if (q.id) {
                 insertValues.questionId = q.id;
               }
@@ -1638,6 +1639,8 @@ export const todoRouter = createRouter({
               const insertValues: any = {
                 userId: ctx.user.id,
                 questionContent: q.content,
+                correctAnswer: q.correctAnswer,
+                options: q.options ? JSON.stringify(q.options) : null,
                 userAnswer: ans.userAnswer,
                 wrongCount: 1,
                 lastWrongAt: new Date(),
