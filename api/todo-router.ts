@@ -971,7 +971,7 @@ export const todoRouter = createRouter({
         }
       }
 
-      // 9. 收集错题到错题本
+      // 9. 收集错题到错题本（失败不阻断主流程）
       for (const q of input.questions) {
         const ans = input.answers.find(a => a.questionId === q.id);
         if (!ans) continue;
@@ -995,40 +995,64 @@ export const todoRouter = createRouter({
 
         // 如果答错，收录到错题本
         if (!isCorrect) {
-          // 查找是否已存在该题目的错题记录
-          const existingWrong = await db
-            .select()
-            .from(wrongAnswers)
-            .where(
-              and(
-                eq(wrongAnswers.userId, ctx.user.id),
-                eq(wrongAnswers.questionContent, q.content)
-              )
-            )
-            .limit(1);
+          try {
+            console.log("[DEBUG wrongAnswers submitTest] processing wrong answer", {
+              qId: q.id,
+              qType: q.questionType,
+              qContentPreview: q.content?.slice(0, 50),
+              hasQuestionId: !!q.id,
+              questionIdValue: q.id,
+              userAnswerPreview: ans.userAnswer?.slice(0, 50),
+            });
 
-          if (existingWrong.length > 0) {
-            // 更新错题记录
-            await db
-              .update(wrongAnswers)
-              .set({
-                wrongCount: existingWrong[0].wrongCount + 1,
-                lastWrongAt: new Date(),
-                mastered: false,
-              })
-              .where(eq(wrongAnswers.id, existingWrong[0].id));
-          } else {
-            // 创建新错题记录
-            await db
-              .insert(wrongAnswers)
-              .values({
+            // 查找是否已存在该题目的错题记录
+            const existingWrong = await db
+              .select()
+              .from(wrongAnswers)
+              .where(
+                and(
+                  eq(wrongAnswers.userId, ctx.user.id),
+                  eq(wrongAnswers.questionContent, q.content)
+                )
+              )
+              .limit(1);
+
+            if (existingWrong.length > 0) {
+              // 更新错题记录
+              await db
+                .update(wrongAnswers)
+                .set({
+                  wrongCount: existingWrong[0].wrongCount + 1,
+                  lastWrongAt: new Date(),
+                  mastered: false,
+                })
+                .where(eq(wrongAnswers.id, existingWrong[0].id));
+              console.log("[DEBUG wrongAnswers submitTest] updated existing wrong answer", { id: existingWrong[0].id });
+            } else {
+              // 创建新错题记录
+              const insertValues: any = {
                 userId: ctx.user.id,
                 questionContent: q.content,
                 userAnswer: ans.userAnswer,
                 wrongCount: 1,
                 lastWrongAt: new Date(),
                 mastered: false,
-              });
+              };
+              // 如果 q.id 存在，尝试存入 questionId（但 schema 中它是 notNull，可能缺失时导致问题）
+              if (q.id) {
+                insertValues.questionId = q.id;
+              }
+              console.log("[DEBUG wrongAnswers submitTest] inserting new wrong answer", { insertKeys: Object.keys(insertValues) });
+              await db.insert(wrongAnswers).values(insertValues);
+              console.log("[DEBUG wrongAnswers submitTest] inserted successfully");
+            }
+          } catch (err) {
+            console.error("[DEBUG wrongAnswers submitTest] FAILED", {
+              error: err instanceof Error ? err.message : String(err),
+              qId: q.id,
+              qContentPreview: q.content?.slice(0, 50),
+            });
+            // 失败不阻断主流程
           }
         }
       }
@@ -1577,40 +1601,62 @@ export const todoRouter = createRouter({
 
         // 如果答错，收录到错题本
         if (!isCorrect) {
-          // 查找是否已存在该题目的错题记录
-          const existingWrong = await db
-            .select()
-            .from(wrongAnswers)
-            .where(
-              and(
-                eq(wrongAnswers.userId, ctx.user.id),
-                eq(wrongAnswers.questionContent, q.content)
-              )
-            )
-            .limit(1);
+          try {
+            console.log("[DEBUG wrongAnswers submitReviewTest] processing wrong answer", {
+              qId: q.id,
+              qType: q.questionType,
+              qContentPreview: q.content?.slice(0, 50),
+              hasQuestionId: !!q.id,
+              questionIdValue: q.id,
+            });
 
-          if (existingWrong.length > 0) {
-            // 更新错题记录
-            await db
-              .update(wrongAnswers)
-              .set({
-                wrongCount: existingWrong[0].wrongCount + 1,
-                lastWrongAt: new Date(),
-                mastered: false,
-              })
-              .where(eq(wrongAnswers.id, existingWrong[0].id));
-          } else {
-            // 创建新错题记录
-            await db
-              .insert(wrongAnswers)
-              .values({
+            // 查找是否已存在该题目的错题记录
+            const existingWrong = await db
+              .select()
+              .from(wrongAnswers)
+              .where(
+                and(
+                  eq(wrongAnswers.userId, ctx.user.id),
+                  eq(wrongAnswers.questionContent, q.content)
+                )
+              )
+              .limit(1);
+
+            if (existingWrong.length > 0) {
+              // 更新错题记录
+              await db
+                .update(wrongAnswers)
+                .set({
+                  wrongCount: existingWrong[0].wrongCount + 1,
+                  lastWrongAt: new Date(),
+                  mastered: false,
+                })
+                .where(eq(wrongAnswers.id, existingWrong[0].id));
+              console.log("[DEBUG wrongAnswers submitReviewTest] updated existing wrong answer", { id: existingWrong[0].id });
+            } else {
+              // 创建新错题记录
+              const insertValues: any = {
                 userId: ctx.user.id,
                 questionContent: q.content,
                 userAnswer: ans.userAnswer,
                 wrongCount: 1,
                 lastWrongAt: new Date(),
                 mastered: false,
-              });
+              };
+              if (q.id) {
+                insertValues.questionId = q.id;
+              }
+              console.log("[DEBUG wrongAnswers submitReviewTest] inserting new wrong answer", { insertKeys: Object.keys(insertValues) });
+              await db.insert(wrongAnswers).values(insertValues);
+              console.log("[DEBUG wrongAnswers submitReviewTest] inserted successfully");
+            }
+          } catch (err) {
+            console.error("[DEBUG wrongAnswers submitReviewTest] FAILED", {
+              error: err instanceof Error ? err.message : String(err),
+              qId: q.id,
+              qContentPreview: q.content?.slice(0, 50),
+            });
+            // 失败不阻断主流程
           }
         }
       }

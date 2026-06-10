@@ -737,60 +737,70 @@ export const questionRouter = createRouter({
         })
         .$returningId();
 
-      // 如果答错，加入错题本
-      if (!evaluation.isCorrect) {
-        const existing = await db
-          .select()
-          .from(wrongAnswers)
-          .where(
-            and(
-              eq(wrongAnswers.userId, ctx.user.id),
-              eq(wrongAnswers.questionId, input.questionId)
-            )
-          );
+      // 如果答错，加入错题本（失败不阻断主流程）
+      try {
+        if (!evaluation.isCorrect) {
+          console.log("[DEBUG wrongAnswers submitAnswer] processing wrong answer", { questionId: input.questionId });
+          const existing = await db
+            .select()
+            .from(wrongAnswers)
+            .where(
+              and(
+                eq(wrongAnswers.userId, ctx.user.id),
+                eq(wrongAnswers.questionId, input.questionId)
+              )
+            );
 
-        if (existing.length > 0) {
-          await db
-            .update(wrongAnswers)
-            .set({
-              wrongCount: existing[0].wrongCount + 1,
-              lastWrongAt: new Date(),
+          if (existing.length > 0) {
+            await db
+              .update(wrongAnswers)
+              .set({
+                wrongCount: existing[0].wrongCount + 1,
+                lastWrongAt: new Date(),
+                userAnswer: input.userAnswer,
+                mastered: false,
+              })
+              .where(eq(wrongAnswers.id, existing[0].id));
+            console.log("[DEBUG wrongAnswers submitAnswer] updated existing");
+          } else {
+            await db.insert(wrongAnswers).values({
+              userId: ctx.user.id,
+              questionId: input.questionId,
               userAnswer: input.userAnswer,
+              imageUrls: input.imageUrls ? JSON.stringify(input.imageUrls) : null,
+              wrongCount: 1,
+              lastWrongAt: new Date(),
               mastered: false,
-            })
-            .where(eq(wrongAnswers.id, existing[0].id));
+            });
+            console.log("[DEBUG wrongAnswers submitAnswer] inserted new");
+          }
         } else {
-          await db.insert(wrongAnswers).values({
-            userId: ctx.user.id,
-            questionId: input.questionId,
-            userAnswer: input.userAnswer,
-            imageUrls: input.imageUrls ? JSON.stringify(input.imageUrls) : null,
-            wrongCount: 1,
-            lastWrongAt: new Date(),
-            mastered: false,
-          });
-        }
-      } else {
-        // 如果答对，更新错题本中的复习次数
-        const existing = await db
-          .select()
-          .from(wrongAnswers)
-          .where(
-            and(
-              eq(wrongAnswers.userId, ctx.user.id),
-              eq(wrongAnswers.questionId, input.questionId)
-            )
-          );
+          // 如果答对，更新错题本中的复习次数
+          const existing = await db
+            .select()
+            .from(wrongAnswers)
+            .where(
+              and(
+                eq(wrongAnswers.userId, ctx.user.id),
+                eq(wrongAnswers.questionId, input.questionId)
+              )
+            );
 
-        if (existing.length > 0) {
-          await db
-            .update(wrongAnswers)
-            .set({
-              reviewCount: existing[0].reviewCount + 1,
-              mastered: existing[0].reviewCount >= 2, // 复习2次后标记为掌握
-            })
-            .where(eq(wrongAnswers.id, existing[0].id));
+          if (existing.length > 0) {
+            await db
+              .update(wrongAnswers)
+              .set({
+                reviewCount: existing[0].reviewCount + 1,
+                mastered: existing[0].reviewCount >= 2, // 复习2次后标记为掌握
+              })
+              .where(eq(wrongAnswers.id, existing[0].id));
+          }
         }
+      } catch (err) {
+        console.error("[DEBUG wrongAnswers submitAnswer] FAILED", {
+          error: err instanceof Error ? err.message : String(err),
+          questionId: input.questionId,
+        });
       }
 
       return {

@@ -329,7 +329,7 @@ export type InsertQuestion = typeof questions.$inferInsert;
 export const userAnswers = mysqlTable("user_answers", {
   id: serial("id").primaryKey(),
   userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
-  questionId: bigint("questionId", { mode: "number", unsigned: true }).notNull(),
+  questionId: varchar("questionId", { length: 50 }).notNull(),
   userAnswer: text("userAnswer").notNull(), // 用户答案
   imageUrls: text("imageUrls"), // 用户上传的图片URL列表(JSON数组)
   isCorrect: boolean("isCorrect").notNull(),
