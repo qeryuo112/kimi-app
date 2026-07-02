@@ -104,15 +104,28 @@ export const authRouter = createRouter({
       console.log("[Auth] login mutation called, username=", input.username);
       const db = getDb();
       console.log("[Auth] login: querying users table");
-      const [user] = await db.select().from(users).where(eq(users.unionId, input.username));
-      console.log("[Auth] login: user found=", !!user, "hasPassword=", !!user?.passwordHash);
+      let user: any;
+      try {
+        [user] = await db.select().from(users).where(eq(users.unionId, input.username));
+        console.log("[Auth] login: user found=", !!user, "hasPassword=", !!user?.passwordHash);
+      } catch (err) {
+        console.error("[Auth] login: QUERY FAILED", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+        throw new Error("登录查询失败");
+      }
 
       if (!user || !user.passwordHash) {
         console.log("[Auth] login: user not found or no password");
         throw new Error("用户名或密码错误");
       }
 
-      console.log("[Auth] login: comparing password");
+      console.log("[Auth] login: comparing password", {
+        passwordLength: input.password.length,
+        passwordChars: input.password.split('').slice(0, 5).map(c => c.charCodeAt(0)),
+        passwordHash: user.passwordHash,
+      });
       const valid = await bcrypt.compare(input.password, user.passwordHash);
       console.log("[Auth] login: password valid=", valid);
       if (!valid) {

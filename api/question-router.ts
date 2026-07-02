@@ -635,18 +635,38 @@ export const questionRouter = createRouter({
     .input(z.object({ ids: z.array(z.number()).min(1) }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      for (const id of input.ids) {
-        await db
+      const ids = input.ids;
+      const idStrs = ids.map(String);
+
+      console.log("[DEBUG deleteMany] start", { userId: ctx.user.id, count: ids.length, ids });
+
+      try {
+        // 批量删除关联答题记录
+        const userAnswersResult = await db
           .delete(userAnswers)
-          .where(and(eq(userAnswers.questionId, id), eq(userAnswers.userId, ctx.user.id)));
-        await db
+          .where(and(inArray(userAnswers.questionId, idStrs), eq(userAnswers.userId, ctx.user.id)));
+        console.log("[DEBUG deleteMany] userAnswers deleted", { affectedRows: userAnswersResult?.[0]?.affectedRows });
+
+        // 批量删除关联错题记录
+        const wrongAnswersResult = await db
           .delete(wrongAnswers)
-          .where(and(eq(wrongAnswers.questionId, id), eq(wrongAnswers.userId, ctx.user.id)));
-        await db
+          .where(and(inArray(wrongAnswers.questionId, idStrs), eq(wrongAnswers.userId, ctx.user.id)));
+        console.log("[DEBUG deleteMany] wrongAnswers deleted", { affectedRows: wrongAnswersResult?.[0]?.affectedRows });
+
+        // 批量删除题目
+        const questionsResult = await db
           .delete(questions)
-          .where(and(eq(questions.id, id), eq(questions.userId, ctx.user.id)));
+          .where(and(inArray(questions.id, ids), eq(questions.userId, ctx.user.id)));
+        console.log("[DEBUG deleteMany] questions deleted", { affectedRows: questionsResult?.[0]?.affectedRows });
+
+        return { success: true, count: ids.length };
+      } catch (err) {
+        console.error("[DEBUG deleteMany] FAILED", {
+          error: err instanceof Error ? err.message : String(err),
+          ids,
+        });
+        throw err;
       }
-      return { success: true, count: input.ids.length };
     }),
 
   // 批量修改题目标签
