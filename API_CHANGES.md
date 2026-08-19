@@ -158,3 +158,32 @@ git revert HEAD
 - AI 会优先沿用文档中已有的时间安排，不重新发明结构
 - AI 生成的 `knowledgeNodes` 字段使用本地已有节点的 title
 - 未能匹配到知识节点的内容会记录在返回结果的 `unmatchedContent` 中
+
+---
+
+## 六、计划文件导入支持参考已有上层计划（2026-08-19 后续）
+
+### 背景
+用户先通过文件导入生成月计划，后续再导入更细粒度的周计划/日计划文档时，AI 需要基于已录入的上层计划继续细化，而不是凭空重新生成。
+
+### 修改的文件
+- `api/lib/ai.ts` — `analyzePlanFromFile`
+  - 新增 `AnalyzePlanFromFileExistingPlan` 类型
+  - `config` 新增可选 `existingPlan` 参数（包含 `roundPlan` / `monthlyPlan` / `weeklyPlan`）
+  - 根据 `scope` 把已有上层计划注入 system / user prompt，要求 AI 在已有框架内细化、禁止改动上层安排
+- `api/plan-router.ts` — `plan.aiGenerateFromPlanFile`
+  - 调用 AI 前读取当前 `plan.aiPlan`
+  - `scope=weekly` 时传入已有 `roundPlan` + `monthlyPlan`
+  - `scope=daily` 时传入已有 `roundPlan` + `monthlyPlan` + `weeklyPlan`
+  - 保存时合并：保留已有上层，覆盖/新增下层；重新生成上层时清空下层和 `generatedMonths`
+- `src/pages/Plans.tsx` — 上传计划文件对话框
+  - 打开弹窗时根据当前计划已有层级智能推荐 scope：
+    - 无月计划 → 默认 `monthly`
+    - 有月计划无周计划 → 默认 `weekly`
+    - 有周计划 → 默认 `daily`
+  - 对话框说明文案增加“参考已有上层计划”提示
+
+### 行为变更
+- 选择 `weekly` 时，如果系统里已有月计划，AI 会沿用已有轮次/月安排，只生成周计划
+- 选择 `daily` 时，如果系统里已有周计划，AI 会沿用已有轮次/月/周安排，只生成日计划
+- 选择 `monthly` 时仍为全新生成，会清空已有的周/日计划

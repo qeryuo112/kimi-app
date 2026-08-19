@@ -2150,6 +2150,12 @@ export interface AnalyzePlanFromFileResult {
   unmatchedContent?: string[];
 }
 
+export interface AnalyzePlanFromFileExistingPlan {
+  roundPlan?: AnalyzePlanFromFileResult["rounds"];
+  monthlyPlan?: AnalyzePlanFromFileResult["months"];
+  weeklyPlan?: AnalyzePlanFromFileResult["weeks"];
+}
+
 export async function analyzePlanFromFile(
   fileUrl: string,
   subjects: AnalyzePlanFromFileSubject[],
@@ -2161,24 +2167,28 @@ export async function analyzePlanFromFile(
     reviewRounds: number;
     requirements?: string;
     scope?: AnalyzePlanFromFileScope;
+    existingPlan?: AnalyzePlanFromFileExistingPlan;
   },
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
 ): Promise<AnalyzePlanFromFileResult> {
   const scope = config.scope || "daily";
+  const existingPlan = config.existingPlan;
   debugLog("analyzePlanFromFile 开始", {
     fileUrl,
     subjectCount: subjects.length,
     nodeCount: knowledgeNodes.length,
     scope,
-    config,
+    hasExistingRoundPlan: !!existingPlan?.roundPlan?.length,
+    hasExistingMonthlyPlan: !!existingPlan?.monthlyPlan?.length,
+    hasExistingWeeklyPlan: !!existingPlan?.weeklyPlan?.length,
   });
 
   const scopeDescriptions: Record<AnalyzePlanFromFileScope, string> = {
-    monthly: "只生成轮次计划和月计划，不要生成 weeks 和 days",
-    weekly: "生成轮次计划、月计划和周计划，不要生成 days",
-    daily: "生成完整四层计划：轮次、月、周、日",
+    monthly: "只生成轮次计划和月计划，不要生成 weeks 和 days（本次是全新生成，无需参考已有计划）",
+    weekly: "只生成周计划。必须基于下面提供的已有轮次计划和月计划进行细化，严禁改动已有的轮次/月安排，也不要重新发明上层时间结构",
+    daily: "只生成日计划。必须基于下面提供的已有轮次计划、月计划和周计划进行细化，严禁改动已有的轮次/月/周安排",
   };
 
   const scopeExamples: Record<AnalyzePlanFromFileScope, string> = {
@@ -2205,11 +2215,27 @@ export async function analyzePlanFromFile(
 }`,
   };
 
+  const existingPlanContextParts: string[] = [];
+  if (existingPlan?.roundPlan?.length) {
+    existingPlanContextParts.push(`【已有轮次计划】\n${JSON.stringify(existingPlan.roundPlan, null, 2)}`);
+  }
+  if (existingPlan?.monthlyPlan?.length) {
+    existingPlanContextParts.push(`【已有月计划】\n${JSON.stringify(existingPlan.monthlyPlan, null, 2)}`);
+  }
+  if (existingPlan?.weeklyPlan?.length) {
+    existingPlanContextParts.push(`【已有周计划】\n${JSON.stringify(existingPlan.weeklyPlan, null, 2)}`);
+  }
+  const existingPlanContext = existingPlanContextParts.length > 0
+    ? `【已录入的上层计划 - 必须严格沿用】\n${existingPlanContextParts.join("\n\n")}\n\n你在生成时必须在以上已有框架内细化，禁止改动或重新生成这些上层计划。`
+    : "";
+
   const systemPrompt = `你是一位学习计划解析与编排专家。请仔细阅读用户上传的学习计划文档（可能是课程大纲、复习时间表、教材目录、拍照笔记、手写计划等），并结合系统提供的已有科目和知识树，生成一份可执行的复习计划。
 
 【生成范围要求】
 用户选择的生成范围是：${scope}
 ${scopeDescriptions[scope]}
+
+${existingPlanContext}
 
 【核心约束 - 必须严格遵守】
 1. **只能使用下面列出的已有科目和知识节点，禁止创造新的科目或节点**
@@ -2236,6 +2262,7 @@ ${scopeExamples[scope]}`;
 
 【生成范围】${scope === "monthly" ? "到月计划" : scope === "weekly" ? "到周计划" : "完整计划（含日计划）"}
 
+${existingPlanContext}
 【已有科目】
 ${subjects.map((s) => `- ${s.title}${s.description ? "：" + s.description : ""}`).join("\n")}
 

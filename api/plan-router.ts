@@ -634,6 +634,22 @@ export const planRouter = createRouter({
         ? new Date(plan.startDate).toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0];
 
+      // 读取当前已保存的计划，作为上层参考传入 AI
+      const existingAiPlan = plan.aiPlan ? JSON.parse(plan.aiPlan) : null;
+      const existingPlan: {
+        roundPlan?: typeof existingAiPlan.roundPlan;
+        monthlyPlan?: typeof existingAiPlan.monthlyPlan;
+        weeklyPlan?: typeof existingAiPlan.weeklyPlan;
+      } = {};
+      if (input.scope === "weekly") {
+        existingPlan.roundPlan = existingAiPlan?.roundPlan;
+        existingPlan.monthlyPlan = existingAiPlan?.monthlyPlan;
+      } else if (input.scope === "daily") {
+        existingPlan.roundPlan = existingAiPlan?.roundPlan;
+        existingPlan.monthlyPlan = existingAiPlan?.monthlyPlan;
+        existingPlan.weeklyPlan = existingAiPlan?.weeklyPlan;
+      }
+
       const result = await analyzePlanFromFile(
         input.fileUrl,
         selectedSubjects.map((s) => ({
@@ -649,6 +665,7 @@ export const planRouter = createRouter({
           reviewRounds: plan.reviewRounds || 3,
           requirements: input.requirements || undefined,
           scope: input.scope,
+          existingPlan,
         },
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
@@ -664,16 +681,26 @@ export const planRouter = createRouter({
         }
       }
 
-      // 根据 scope 清理未生成层级的数据，确保前端状态一致
-      const safeWeeklyPlan = input.scope === "monthly" ? [] : result.weeks;
-      const safeDailyPlan = input.scope === "monthly" || input.scope === "weekly" ? [] : result.days;
-
+      // 合并：保留已有上层计划，覆盖/新增下层计划
+      const basePlan = existingAiPlan || {};
       const fullPlan = {
-        roundPlan: result.rounds,
-        monthlyPlan: result.months,
-        weeklyPlan: safeWeeklyPlan,
-        dailyPlan: safeDailyPlan,
-        generatedWeeks: input.scope === "daily" ? result.days.map((d: any) => d.week).filter((v: number, i: number, a: number[]) => a.indexOf(v) === i) : [],
+        ...basePlan,
+        roundPlan: existingPlan.roundPlan?.length > 0 ? existingPlan.roundPlan : result.rounds,
+        monthlyPlan: existingPlan.monthlyPlan?.length > 0 ? existingPlan.monthlyPlan : result.months,
+        weeklyPlan:
+          input.scope === "daily"
+            ? existingPlan.weeklyPlan?.length > 0
+              ? existingPlan.weeklyPlan
+              : result.weeks
+            : input.scope === "weekly"
+              ? result.weeks
+              : [],
+        dailyPlan: input.scope === "daily" ? result.days : [],
+        generatedWeeks:
+          input.scope === "daily"
+            ? result.days.map((d: any) => d.week).filter((v: number, i: number, a: number[]) => a.indexOf(v) === i)
+            : [],
+        generatedMonths: [], // 重新通过文件生成上层/下层后，按月生成的记录失效
         nodeMap: Object.fromEntries(titleToNodeIdMap),
         unmatchedContent: result.unmatchedContent || [],
       };
