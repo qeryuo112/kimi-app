@@ -2110,6 +2110,8 @@ export interface AnalyzePlanFromFileNode {
   parentTitle?: string | null;
 }
 
+export type AnalyzePlanFromFileScope = "monthly" | "weekly" | "daily";
+
 export interface AnalyzePlanFromFileResult {
   rounds: Array<{
     round: number;
@@ -2158,39 +2160,70 @@ export async function analyzePlanFromFile(
     totalMonths: number;
     reviewRounds: number;
     requirements?: string;
+    scope?: AnalyzePlanFromFileScope;
   },
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
 ): Promise<AnalyzePlanFromFileResult> {
+  const scope = config.scope || "daily";
   debugLog("analyzePlanFromFile 开始", {
     fileUrl,
     subjectCount: subjects.length,
     nodeCount: knowledgeNodes.length,
+    scope,
     config,
   });
 
-  const systemPrompt = `你是一位学习计划解析与编排专家。请仔细阅读用户上传的学习计划文档（可能是课程大纲、复习时间表、教材目录、拍照笔记、手写计划等），并结合系统提供的已有科目和知识树，生成一份完整、可执行的复习计划。
+  const scopeDescriptions: Record<AnalyzePlanFromFileScope, string> = {
+    monthly: "只生成轮次计划和月计划，不要生成 weeks 和 days",
+    weekly: "生成轮次计划、月计划和周计划，不要生成 days",
+    daily: "生成完整四层计划：轮次、月、周、日",
+  };
 
-【核心约束 - 必须严格遵守】
-1. **只能使用下面列出的已有科目和知识节点，禁止创造新的科目或节点**
-2. 每个 dailyPlan / weeklyPlan 条目中的 knowledgeNodes 必须从已知知识节点 title 中选择，优先使用文档中明确提到的节点
-3. 如果文档内容无法对应到具体节点，选择最接近的一个或多个节点，并在 unmatchedContent 中记录原文片段
-4. 每天必须安排所有相关科目，同一日期可以有多个科目条目
-5. 每7天安排一次回顾日（review=true），复习当周已学节点
-6. 高难度/高重要性节点分配更多时间
-7. 考虑知识点依赖关系，前置知识优先安排
-8. 如果文档没有明确时间，按总时长合理分配
-9. 输出的 knowledgeNodes 必须使用原文给出的节点 title，不得改写
-
-请返回严格 JSON 格式，不要包含任何其他文本：
-{
+  const scopeExamples: Record<AnalyzePlanFromFileScope, string> = {
+    monthly: `{
+  "rounds": [{"round":1,"name":"基础阶段","focus":"...","strategy":"...","months":[1,2]}],
+  "months": [{"month":1,"monthName":"第1个月","round":1,"focus":"...","subjects":["科目1"],"goals":["目标1"]}],
+  "weeks": [],
+  "days": [],
+  "unmatchedContent": ["文档中提到但无法匹配的原文片段"]
+}`,
+    weekly: `{
+  "rounds": [{"round":1,"name":"基础阶段","focus":"...","strategy":"...","months":[1,2]}],
+  "months": [{"month":1,"monthName":"第1个月","round":1,"focus":"...","subjects":["科目1"],"goals":["目标1"]}],
+  "weeks": [{"week":1,"month":1,"focus":"...","subjects":["科目1"],"knowledgeNodes":["节点1"],"goals":["目标1"]}],
+  "days": [],
+  "unmatchedContent": ["文档中提到但无法匹配的原文片段"]
+}`,
+    daily: `{
   "rounds": [{"round":1,"name":"基础阶段","focus":"...","strategy":"...","months":[1,2]}],
   "months": [{"month":1,"monthName":"第1个月","round":1,"focus":"...","subjects":["科目1"],"goals":["目标1"]}],
   "weeks": [{"week":1,"month":1,"focus":"...","subjects":["科目1"],"knowledgeNodes":["节点1"],"goals":["目标1"]}],
   "days": [{"day":1,"date":"2026-08-20","week":1,"month":1,"subject":"科目1","knowledgeNodes":["节点1"],"estimatedMinutes":60,"focus":"...","review":false}],
   "unmatchedContent": ["文档中提到但无法匹配的原文片段"]
-}`;
+}`,
+  };
+
+  const systemPrompt = `你是一位学习计划解析与编排专家。请仔细阅读用户上传的学习计划文档（可能是课程大纲、复习时间表、教材目录、拍照笔记、手写计划等），并结合系统提供的已有科目和知识树，生成一份可执行的复习计划。
+
+【生成范围要求】
+用户选择的生成范围是：${scope}
+${scopeDescriptions[scope]}
+
+【核心约束 - 必须严格遵守】
+1. **只能使用下面列出的已有科目和知识节点，禁止创造新的科目或节点**
+2. 每个 weeklyPlan 条目中的 knowledgeNodes 必须从已知知识节点 title 中选择，优先使用文档中明确提到的节点
+3. 如果文档内容无法对应到具体节点，选择最接近的一个或多个节点，并在 unmatchedContent 中记录原文片段
+4. **如果文档本身已经包含明确的时间安排（如"第1周学第1章"、"8月复习药理学"），请优先尊重并沿用原文结构，不要重新发明时间安排**
+5. 高难度/高重要性节点分配更多时间
+6. 考虑知识点依赖关系，前置知识优先安排
+7. 如果文档没有明确时间，按总时长合理分配
+8. 输出的 knowledgeNodes 必须使用原文给出的节点 title，不得改写
+9. 不在生成范围内的层级必须返回空数组 []
+
+请返回严格 JSON 格式，不要包含任何其他文本：
+${scopeExamples[scope]}`;
 
   const nodeListText = knowledgeNodes
     .map(
@@ -2200,6 +2233,8 @@ export async function analyzePlanFromFile(
     .join("\n");
 
   const userPrompt = `请根据上传的计划文档，为以下科目生成复习计划：
+
+【生成范围】${scope === "monthly" ? "到月计划" : scope === "weekly" ? "到周计划" : "完整计划（含日计划）"}
 
 【已有科目】
 ${subjects.map((s) => `- ${s.title}${s.description ? "：" + s.description : ""}`).join("\n")}
@@ -2214,7 +2249,7 @@ ${nodeListText}
 - 复习轮数：${config.reviewRounds}轮
 ${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
 
-请从上传的文档中读取计划内容，并输出标准 JSON 格式的完整复习计划。`;
+请从上传的文档中读取计划内容，并输出标准 JSON 格式的复习计划。如果文档中已有时间安排，请直接沿用并整合到输出中。`;
 
   const contentBlocks = await processUrlsToContentBlocks([fileUrl], { modelName, apiKey });
   contentBlocks.push({ type: "text", text: userPrompt });
@@ -2230,13 +2265,14 @@ ${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
     apiUrl,
     modelName,
     true,
-    "analyzePlanFromFile"
+    `analyzePlanFromFile.${scope}`
   );
 
   try {
     const jsonStr = extractJsonFromResponse(result);
     const parsed = JSON.parse(jsonStr);
     debugLog("analyzePlanFromFile 解析成功", {
+      scope,
       roundsCount: parsed.rounds?.length,
       monthsCount: parsed.months?.length,
       weeksCount: parsed.weeks?.length,
@@ -2252,6 +2288,7 @@ ${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
     };
   } catch (err) {
     debugLogError("analyzePlanFromFile JSON解析失败", {
+      scope,
       rawResponse: result.slice(0, 1000),
       extractedJson: extractJsonFromResponse(result).slice(0, 1000),
       error: err instanceof Error ? err.message : String(err),

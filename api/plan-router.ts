@@ -554,6 +554,7 @@ export const planRouter = createRouter({
         subjectIds: z.array(z.number()).min(1),
         fileUrl: z.string().url(),
         requirements: z.string().optional(),
+        scope: z.enum(["monthly", "weekly", "daily"]).default("daily"),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -562,6 +563,7 @@ export const planRouter = createRouter({
         planId: input.planId,
         subjectIds: input.subjectIds,
         fileUrl: input.fileUrl,
+        scope: input.scope,
         requirements: input.requirements,
       });
 
@@ -646,6 +648,7 @@ export const planRouter = createRouter({
           totalMonths: plan.totalMonths || 3,
           reviewRounds: plan.reviewRounds || 3,
           requirements: input.requirements || undefined,
+          scope: input.scope,
         },
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
@@ -661,12 +664,16 @@ export const planRouter = createRouter({
         }
       }
 
+      // 根据 scope 清理未生成层级的数据，确保前端状态一致
+      const safeWeeklyPlan = input.scope === "monthly" ? [] : result.weeks;
+      const safeDailyPlan = input.scope === "monthly" || input.scope === "weekly" ? [] : result.days;
+
       const fullPlan = {
         roundPlan: result.rounds,
         monthlyPlan: result.months,
-        weeklyPlan: result.weeks,
-        dailyPlan: result.days,
-        generatedWeeks: [],
+        weeklyPlan: safeWeeklyPlan,
+        dailyPlan: safeDailyPlan,
+        generatedWeeks: input.scope === "daily" ? result.days.map((d: any) => d.week).filter((v: number, i: number, a: number[]) => a.indexOf(v) === i) : [],
         nodeMap: Object.fromEntries(titleToNodeIdMap),
         unmatchedContent: result.unmatchedContent || [],
       };

@@ -257,20 +257,23 @@ export default function Plans() {
   const [showUploadPlanDialog, setShowUploadPlanDialog] = useState(false);
   const [uploadPlanFiles, setUploadPlanFiles] = useState<Array<{ url: string; name: string }>>([]);
   const [uploadPlanSubjectIds, setUploadPlanSubjectIds] = useState<Set<number>>(new Set());
+  const [uploadPlanScope, setUploadPlanScope] = useState<"monthly" | "weekly" | "daily">("daily");
   const [isUploadingPlanFile, setIsUploadingPlanFile] = useState(false);
   const [uploadPlanRequirements, setUploadPlanRequirements] = useState("");
 
-  // 从上传的计划文件生成完整复习计划
+  // 从上传的计划文件生成复习计划
   const aiGenerateFromPlanFile = trpc.plan.aiGenerateFromPlanFile.useMutation({
     onSuccess: (data) => {
       if (expandedPlan !== null) {
         utils.plan.getById.invalidate({ id: expandedPlan });
       }
+      const scopeText = data.dailyPlan?.length ? "完整计划" : data.weeklyPlan?.length ? "到周计划" : "到月计划";
       const unmatchedCount = data.unmatchedContent?.length || 0;
-      toast.success(`计划文件解析成功！共 ${data.weeklyPlan?.length || 0} 周${unmatchedCount > 0 ? `，有 ${unmatchedCount} 处内容未能匹配到知识节点` : ""}`);
+      toast.success(`计划文件解析成功！生成${scopeText}${unmatchedCount > 0 ? `，有 ${unmatchedCount} 处内容未能匹配到知识节点` : ""}`);
       setShowUploadPlanDialog(false);
       setUploadPlanFiles([]);
       setUploadPlanSubjectIds(new Set());
+      setUploadPlanScope("daily");
       setUploadPlanRequirements("");
     },
     onError: (err) => {
@@ -333,6 +336,7 @@ export default function Plans() {
       planId,
       subjectIds: Array.from(uploadPlanSubjectIds),
       fileUrl: uploadPlanFiles[0].url,
+      scope: uploadPlanScope,
       requirements: uploadPlanRequirements || undefined,
     });
   };
@@ -1511,6 +1515,44 @@ export default function Plans() {
             ) : (
               <p className="text-sm text-muted-foreground">暂无可用科目，请先去「科目管理」创建科目</p>
             )}
+          </div>
+
+          {/* 生成范围选择 */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">生成范围</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: "monthly", label: "到月计划" },
+                { value: "weekly", label: "到周计划" },
+                { value: "daily", label: "完整计划" },
+              ].map((option) => (
+                <label
+                  key={option.value}
+                  className={`flex items-center justify-center gap-2 p-2 rounded-lg border text-sm cursor-pointer transition-colors ${
+                    uploadPlanScope === option.value
+                      ? "bg-primary/10 border-primary text-primary"
+                      : "bg-secondary/20 border-border hover:bg-secondary/30"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="uploadPlanScope"
+                    value={option.value}
+                    checked={uploadPlanScope === option.value}
+                    onChange={() => setUploadPlanScope(option.value as any)}
+                    className="sr-only"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {uploadPlanScope === "monthly"
+                ? "只生成轮次和月计划，后续可手动生成周/日计划"
+                : uploadPlanScope === "weekly"
+                ? "生成到周计划，后续可分周生成每日任务"
+                : "一次性生成完整四层计划"}
+            </p>
           </div>
 
           {/* 文件上传 */}
