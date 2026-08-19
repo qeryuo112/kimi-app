@@ -38,8 +38,7 @@ import {
   examPapers,
 } from "@db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills, generateCompleteStudyPlanFromFile, generateRoundAndMonthlyPlanFromFile, generateWeeklyPlanFromFile, generateMonthlyWeeklyPlanFromFile, generateDailyPlanFromFile, generateWeeklyDailyPlanFromFile, generateWeeklyReviewQuestions, evaluateWeeklyReview } from "./lib/ai";
-import { formatLocalDate } from "./lib/date-utils";
+import { searchAndAnalyzeSubjects, generateRoundAndMonthlyPlan, generateWeeklyPlan, generateDailyPlan, analyzeContentForKnowledgeTree, analyzeContentForSkills, generateCompleteStudyPlanFromFile, generateRoundAndMonthlyPlanFromFile, generateWeeklyPlanFromFile, generateMonthlyWeeklyPlanFromFile, generateDailyPlanFromFile, generateWeeklyDailyPlanFromFile, generateWeeklyReviewQuestions, evaluateWeeklyReview, analyzePlanFromFile } from "./lib/ai";
 
 // ========== 辅助函数：收集计划科目数据并上传到文件服务器 ==========
 
@@ -198,151 +197,23 @@ export const planRouter = createRouter({
         .then(([p]) => p);
     }),
 
-  // 删除计划（级联删除所有相关数据：科目、知识树、技能、任务、复习调度等）
+  // 删除计划（仅删除计划生命周期数据，保留科目/知识树/题库等可复用数据）
   delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
 
-      // 1. 获取该计划关联的所有科目ID
-      const planSubjectLinks = await db
-        .select({ subjectId: planSubjects.subjectId })
-        .from(planSubjects)
-        .where(eq(planSubjects.planId, input.id));
+      // 1. 验证计划存在且属于当前用户
+      const [plan] = await db
+        .select()
+        .from(plans)
+        .where(and(eq(plans.id, input.id), eq(plans.userId, ctx.user.id)));
 
-      const subjectIds = planSubjectLinks.map((ps) => ps.subjectId);
-
-      // 2. 如果有关联科目，清理相关数据
-      if (subjectIds.length > 0) {
-        // 2.1 获取这些科目下的所有知识节点ID
-        const nodes = await db
-          .select({ id: knowledgeNodes.id })
-          .from(knowledgeNodes)
-          .where(
-            and(
-              eq(knowledgeNodes.userId, ctx.user.id),
-              inArray(knowledgeNodes.subjectId, subjectIds)
-            )
-          );
-
-        const nodeIds = nodes.map((n) => n.id);
-
-        // 2.2 获取这些科目下的所有技能维度ID
-        const skills = await db
-          .select({ id: skillDimensions.id })
-          .from(skillDimensions)
-          .where(
-            and(
-              eq(skillDimensions.userId, ctx.user.id),
-              inArray(skillDimensions.subjectId, subjectIds)
-            )
-          );
-
-        const skillIds = skills.map((s) => s.id);
-
-        // 2.3 删除知识边（基于知识节点）
-        if (nodeIds.length > 0) {
-          await db
-            .delete(knowledgeEdges)
-            .where(
-              and(
-                eq(knowledgeEdges.userId, ctx.user.id),
-                inArray(knowledgeEdges.sourceNodeId, nodeIds)
-              )
-            );
-        }
-
-        // 2.4 删除知识节点
-        await db
-          .delete(knowledgeNodes)
-          .where(
-            and(
-              eq(knowledgeNodes.userId, ctx.user.id),
-              inArray(knowledgeNodes.subjectId, subjectIds)
-            )
-          );
-
-        // 2.5 删除技能评估（基于技能维度）
-        if (skillIds.length > 0) {
-          await db
-            .delete(skillAssessments)
-            .where(
-              and(
-                eq(skillAssessments.userId, ctx.user.id),
-                inArray(skillAssessments.skillId, skillIds)
-              )
-            );
-        }
-
-        // 2.6 删除技能维度
-        await db
-          .delete(skillDimensions)
-          .where(
-            and(
-              eq(skillDimensions.userId, ctx.user.id),
-              inArray(skillDimensions.subjectId, subjectIds)
-            )
-          );
-
-        // 2.7 删除学习记录
-        await db
-          .delete(studyLogs)
-          .where(
-            and(
-              eq(studyLogs.userId, ctx.user.id),
-              inArray(studyLogs.subjectId, subjectIds)
-            )
-          );
-
-        // 2.8 获取这些科目下的所有题目ID
-        const subjectQuestions = await db
-          .select({ id: questions.id })
-          .from(questions)
-          .where(
-            and(
-              eq(questions.userId, ctx.user.id),
-              inArray(questions.subjectId, subjectIds)
-            )
-          );
-
-        const questionIds = subjectQuestions.map((q) => q.id);
-
-        // 2.9 删除用户答题记录（基于题目）
-        if (questionIds.length > 0) {
-          await db
-            .delete(userAnswers)
-            .where(
-              and(
-                eq(userAnswers.userId, ctx.user.id),
-                inArray(userAnswers.questionId, questionIds)
-              )
-            );
-        }
-
-        // 2.10 删除错题记录（基于题目）
-        if (questionIds.length > 0) {
-          await db
-            .delete(wrongAnswers)
-            .where(
-              and(
-                eq(wrongAnswers.userId, ctx.user.id),
-                inArray(wrongAnswers.questionId, questionIds)
-              )
-            );
-        }
-
-        // 2.11 删除科目
-        await db
-          .delete(subjects)
-          .where(
-            and(
-              eq(subjects.userId, ctx.user.id),
-              inArray(subjects.id, subjectIds)
-            )
-          );
+      if (!plan) {
+        throw new Error("计划不存在或无权限");
       }
 
-      // 3. 删除每日任务
+      // 2. 删除每日任务（计划专属）
       await db
         .delete(dailyTodos)
         .where(
@@ -352,7 +223,7 @@ export const planRouter = createRouter({
           )
         );
 
-      // 4. 删除复习调度
+      // 3. 删除复习调度（计划专属）
       await db
         .delete(reviewSchedules)
         .where(
@@ -362,12 +233,22 @@ export const planRouter = createRouter({
           )
         );
 
-      // 5. 删除计划科目关联
+      // 4. 删除周测回顾（计划专属，修复原代码遗漏）
+      await db
+        .delete(weeklyReviews)
+        .where(
+          and(
+            eq(weeklyReviews.userId, ctx.user.id),
+            eq(weeklyReviews.planId, input.id)
+          )
+        );
+
+      // 5. 删除计划-科目关联（仅解绑，不删科目本身）
       await db
         .delete(planSubjects)
         .where(eq(planSubjects.planId, input.id));
 
-      // 6. 删除计划
+      // 6. 删除计划本身
       await db
         .delete(plans)
         .where(and(eq(plans.id, input.id), eq(plans.userId, ctx.user.id)));
@@ -665,6 +546,155 @@ export const planRouter = createRouter({
         results,
       };
     }),
+  // 从上传的计划文件生成完整复习计划（基于已有科目和知识树）
+  aiGenerateFromPlanFile: authedQuery
+    .input(
+      z.object({
+        planId: z.number(),
+        subjectIds: z.array(z.number()).min(1),
+        fileUrl: z.string().url(),
+        requirements: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const overallStart = Date.now();
+      planDebugLog("aiGenerateFromPlanFile 开始", {
+        planId: input.planId,
+        subjectIds: input.subjectIds,
+        fileUrl: input.fileUrl,
+        requirements: input.requirements,
+      });
+
+      const db = getDb();
+      const [plan] = await db
+        .select()
+        .from(plans)
+        .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
+
+      if (!plan) throw new Error("计划不存在");
+
+      // 验证所选科目是否属于当前用户且已关联到计划
+      const selectedSubjects = await db
+        .select()
+        .from(subjects)
+        .where(and(eq(subjects.userId, ctx.user.id), inArray(subjects.id, input.subjectIds)));
+
+      if (selectedSubjects.length !== input.subjectIds.length) {
+        throw new Error("所选科目不存在或无权限");
+      }
+
+      const planSubjectLinks = await db
+        .select()
+        .from(planSubjects)
+        .where(and(eq(planSubjects.planId, input.planId), inArray(planSubjects.subjectId, input.subjectIds)));
+
+      const linkedSubjectIds = new Set(planSubjectLinks.map((ps) => ps.subjectId));
+      const unlinkedSubjectIds = input.subjectIds.filter((id) => !linkedSubjectIds.has(id));
+      if (unlinkedSubjectIds.length > 0) {
+        throw new Error(`以下科目尚未关联到计划，请先添加：${selectedSubjects.filter((s) => unlinkedSubjectIds.includes(s.id)).map((s) => s.title).join("、")}`);
+      }
+
+      // 拉取所选科目的知识树
+      const allNodes = await db
+        .select()
+        .from(knowledgeNodes)
+        .where(
+          and(
+            eq(knowledgeNodes.userId, ctx.user.id),
+            inArray(knowledgeNodes.subjectId, input.subjectIds)
+          )
+        );
+
+      if (allNodes.length === 0) {
+        throw new Error("所选科目尚未生成知识树，请先使用AI分析功能");
+      }
+
+      // 构建节点 ID -> title 映射，用于生成 parentTitle
+      const nodeIdToTitleMap = new Map(allNodes.map((n) => [n.id, n.title]));
+      const nodesWithParentTitle = allNodes.map((n) => ({
+        id: n.id,
+        subjectId: n.subjectId,
+        title: n.title,
+        level: n.level,
+        estimatedMinutes: n.estimatedMinutes,
+        difficulty: n.difficulty,
+        importance: n.importance,
+        parentTitle: n.parentId ? nodeIdToTitleMap.get(n.parentId) || null : null,
+      }));
+
+      planDebugLog("aiGenerateFromPlanFile 知识树已准备", {
+        subjectCount: selectedSubjects.length,
+        nodeCount: nodesWithParentTitle.length,
+      });
+
+      const setting = await getUserAiSetting(ctx.user.id);
+      const startDate = plan.startDate
+        ? new Date(plan.startDate).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0];
+
+      const result = await analyzePlanFromFile(
+        input.fileUrl,
+        selectedSubjects.map((s) => ({
+          id: s.id,
+          title: s.title,
+          description: s.description,
+        })),
+        nodesWithParentTitle,
+        {
+          dailyMinutes: plan.dailyMinutes,
+          startDate,
+          totalMonths: plan.totalMonths || 3,
+          reviewRounds: plan.reviewRounds || 3,
+          requirements: input.requirements || undefined,
+        },
+        setting?.aiApiKey || undefined,
+        setting?.aiApiEndpoint || undefined,
+        setting?.aiModel || undefined
+      );
+
+      // 构建 title -> id 映射，用于前端精确关联
+      const titleToNodeIdMap = new Map<string, number>();
+      for (const node of allNodes) {
+        // 多个节点可能有相同 title（不同科目下），优先保留第一个
+        if (!titleToNodeIdMap.has(node.title)) {
+          titleToNodeIdMap.set(node.title, node.id);
+        }
+      }
+
+      const fullPlan = {
+        roundPlan: result.rounds,
+        monthlyPlan: result.months,
+        weeklyPlan: result.weeks,
+        dailyPlan: result.days,
+        generatedWeeks: [],
+        nodeMap: Object.fromEntries(titleToNodeIdMap),
+        unmatchedContent: result.unmatchedContent || [],
+      };
+
+      await db
+        .update(plans)
+        .set({
+          aiPlan: JSON.stringify(fullPlan),
+          sourceDocumentUrl: input.fileUrl,
+        })
+        .where(eq(plans.id, input.planId));
+
+      planDebugLog("aiGenerateFromPlanFile 完成", {
+        elapsedMs: Date.now() - overallStart,
+        roundCount: result.rounds.length,
+        monthCount: result.months.length,
+        weekCount: result.weeks.length,
+        dayCount: result.days.length,
+        unmatchedCount: (result.unmatchedContent || []).length,
+      });
+
+      return {
+        ...fullPlan,
+        success: true,
+        sourceDocumentUrl: input.fileUrl,
+      };
+    }),
+
   aiGenerateSchedule: authedQuery
     .input(z.object({ id: z.number(), requirements: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
@@ -737,7 +767,9 @@ export const planRouter = createRouter({
         .from(userSettings)
         .where(eq(userSettings.userId, ctx.user.id));
 
-      const startDate = formatLocalDate(plan.startDate);
+      const startDate = plan.startDate
+        ? new Date(plan.startDate).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0];
 
       // 使用用户设定的参数
       const totalMonths = plan.totalMonths || 3;
@@ -856,7 +888,7 @@ export const planRouter = createRouter({
       if (!plan) throw new Error("计划不存在");
 
       const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
-      const startDate = formatLocalDate(plan.startDate);
+      const startDate = plan.startDate ? new Date(plan.startDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
       const totalMonths = plan.totalMonths || 3;
       const reviewRounds = plan.reviewRounds || 3;
 
@@ -913,7 +945,7 @@ export const planRouter = createRouter({
       }
 
       const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
-      const startDate = formatLocalDate(plan.startDate);
+      const startDate = plan.startDate ? new Date(plan.startDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
       const totalMonths = plan.totalMonths || 3;
       const totalWeeks = Math.ceil(totalMonths * 4.3);
 
@@ -991,7 +1023,9 @@ export const planRouter = createRouter({
         throw new Error(`第${input.monthNumber}月的周计划已生成`);
       }
 
-      const startDate = formatLocalDate(plan.startDate);
+      const startDate = plan.startDate
+        ? new Date(plan.startDate).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0];
       const totalMonths = plan.totalMonths || 3;
       const totalWeeks = Math.ceil(totalMonths * 4.3);
       const weeksPerMonth = Math.round(totalWeeks / totalMonths);
@@ -1104,7 +1138,7 @@ export const planRouter = createRouter({
       if (!plan) throw new Error("计划不存在");
 
       const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
-      const startDate = formatLocalDate(plan.startDate);
+      const startDate = plan.startDate ? new Date(plan.startDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
       const totalMonths = plan.totalMonths || 3;
       const reviewRounds = plan.reviewRounds || 3;
 
@@ -1152,7 +1186,7 @@ export const planRouter = createRouter({
       }
 
       const { subjectsData } = await collectPlanSubjectsData(plan.id, ctx.user.id);
-      const startDate = formatLocalDate(plan.startDate);
+      const startDate = plan.startDate ? new Date(plan.startDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
       const totalMonths = plan.totalMonths || 3;
       const totalWeeks = Math.ceil(totalMonths * 4.3);
 
@@ -1240,7 +1274,9 @@ export const planRouter = createRouter({
         .from(userSettings)
         .where(eq(userSettings.userId, ctx.user.id));
 
-      const startDate = formatLocalDate(plan.startDate);
+      const startDate = plan.startDate
+        ? new Date(plan.startDate).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0];
 
       // 获取科目数据
       const ps = await db
@@ -1255,15 +1291,11 @@ export const planRouter = createRouter({
         .where(and(eq(subjects.userId, ctx.user.id)))
         .then((rows) => rows.filter((s) => subjectIds.includes(s.id)));
 
-      // 只保留本周涉及的科目，避免 AI 把全部科目塞进一周
-      const weekSubjectTitles = new Set(weekData.subjects || []);
-      const subjectsData = planSubs
-        .filter((s) => weekSubjectTitles.has(s.title))
-        .map((s) => ({
-          title: s.title,
-          priority: s.priority,
-          difficulty: s.difficulty,
-        }));
+      const subjectsData = planSubs.map((s) => ({
+        title: s.title,
+        priority: s.priority,
+        difficulty: s.difficulty,
+      }));
 
       // 构建周上下文
       const weeklyContext = `第${weekData.week}周(第${weekData.month}月)：${weekData.focus}；知识点：${weekData.knowledgeNodes?.join("、")}`;
@@ -1552,8 +1584,8 @@ export const planRouter = createRouter({
           userId: ctx.user.id,
           planId: input.planId,
           weekNumber: input.weekNumber,
-          weekStartDate: formatLocalDate(weekStart),
-          weekEndDate: formatLocalDate(weekEnd),
+          weekStartDate: weekStart.toISOString().split("T")[0],
+          weekEndDate: weekEnd.toISOString().split("T")[0],
           questionIds: JSON.stringify(savedQuestionIds),
           knowledgeSummary: reviewResult.knowledgeSummary,
           totalQuestions: savedQuestionIds.length,

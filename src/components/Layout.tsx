@@ -20,8 +20,6 @@ import {
 } from "lucide-react";
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
-import { useTheme } from "next-themes";
-import { trpc } from "@/providers/trpc";
 import type { LucideIcon } from "lucide-react";
 
 interface NavItem {
@@ -46,21 +44,7 @@ const navItems: NavItem[] = [
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { setTheme } = useTheme();
   const { user, isLoading, isAuthenticated, logout } = useAuth();
-
-  // 同步用户主题设置
-  const { data: userSettings } = trpc.settings.get.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
-
-  useEffect(() => {
-    console.log("[Theme-DEBUG] Layout userSettings 变化:", { theme: userSettings?.theme });
-    if (userSettings?.theme) {
-      setTheme(userSettings.theme);
-      console.log("[Theme-DEBUG] Layout setTheme 已调用:", userSettings.theme);
-    }
-  }, [userSettings?.theme, setTheme]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -69,7 +53,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [isLoading, isAuthenticated, navigate]);
 
   if (isLoading) {
-    console.log("[Layout] showing loading screen");
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="text-muted-foreground">加载中...</div>
@@ -77,10 +60,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthenticated) {
-    console.log("[Layout] not authenticated, returning null (black screen)");
-    return null;
-  }
+  if (!isAuthenticated) return null;
 
   return (
     <div className="flex h-screen bg-background">

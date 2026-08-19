@@ -59,12 +59,6 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.R
 };
 
 export default function Subjects() {
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [analyzingId, setAnalyzingId] = useState<number | null>(null);
-  const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [sourceMode, setSourceMode] = useState<"text" | "file">("text");
-
   const { isAuthenticated } = useAuth({
     redirectOnUnauthenticated: true,
     redirectPath: LOGIN_PATH,
@@ -74,55 +68,61 @@ export default function Subjects() {
   const { data: subjects, isLoading } = trpc.subject.list.useQuery(undefined, {
     enabled: isAuthenticated,
   });
-  console.log("[DEBUG Subjects render] isLoading=", isLoading, "subjectsCount=", subjects?.length, "analyzingId=", analyzingId);
 
   const createSubject = trpc.subject.create.useMutation({
     onSuccess: (data) => {
-      console.log("[DEBUG create] onSuccess, data=", JSON.stringify(data));
       utils.subject.list.invalidate();
+      toast.success("科目创建成功");
       setIsDialogOpen(false);
       resetForm();
-      // 延迟toast，避免与React渲染竞争DOM
-      setTimeout(() => toast.success("科目创建成功"), 0);
       // 如果有内容，自动触发AI分析（AI会自动判断难度和优先级）
       if (data?.sourceContent) {
-        console.log("[DEBUG create] auto-trigger analyze for id=", data.id);
         setAnalyzingId(data.id);
         analyzeSubject.mutate({ id: data.id });
       }
     },
-    onError: (err) => {
-      console.error("[DEBUG create] onError, err=", err);
-      setTimeout(() => toast.error(err.message), 0);
-    },
+    onError: (err) => toast.error(err.message),
   });
 
   const deleteSubject = trpc.subject.delete.useMutation({
     onSuccess: () => {
       utils.subject.list.invalidate();
-      setTimeout(() => toast.success("科目已删除"), 0);
+      toast.success("科目已删除");
     },
-    onError: (err) => setTimeout(() => toast.error(err.message), 0),
+    onError: (err) => toast.error(err.message),
   });
 
   const analyzeSubject = trpc.subject.analyze.useMutation({
-    onMutate: (vars) => {
-      console.log("[DEBUG analyze] onMutate called, id=", vars.id);
-    },
     onSuccess: (data) => {
-      console.log("[DEBUG analyze] onSuccess called, data=", JSON.stringify(data));
       utils.subject.list.invalidate();
+      toast.success(`AI分析完成！生成 ${data.nodesCount} 个知识点, ${data.skillsCount} 个技能维度`);
       setAnalyzingId(null);
-      // 延迟toast，避免与React渲染竞争DOM
-      setTimeout(() => toast.success(`AI分析完成！生成 ${data.nodesCount} 个知识点, ${data.skillsCount} 个技能维度`), 0);
-      console.log("[DEBUG analyze] onSuccess finished");
     },
     onError: (err) => {
-      console.error("[DEBUG analyze] onError called, err=", err);
+      toast.error(err.message);
       setAnalyzingId(null);
-      setTimeout(() => toast.error(err.message), 0);
     },
   });
+
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [analyzingId, setAnalyzingId] = useState<number | null>(null);
+
+  // 表单状态
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    category: "",
+    sourceType: "other" as "book" | "course" | "article" | "manual" | "other",
+    sourceContent: "",
+    difficulty: 3,
+    priority: 2,
+    color: "#3b82f6",
+  });
+
+  // 文件上传状态
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string }>>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [sourceMode, setSourceMode] = useState<"text" | "file">("text");
 
   const { data: settings } = trpc.settings.get.useQuery();
 
@@ -140,20 +140,6 @@ export default function Subjects() {
     setUploadedFiles([]);
     setSourceMode("text");
   };
-
-  // 表单状态
-  const [form, setForm] = useState({
-    title: "",
-    description: "",
-    category: "",
-    sourceType: "other" as "book" | "course" | "article" | "manual" | "other",
-    sourceContent: "",
-    difficulty: 3,
-    priority: 2,
-    color: "#3b82f6",
-  });
-
-  // 文件上传状态（已在顶部声明）
 
   // 文件上传处理
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -220,11 +206,8 @@ export default function Subjects() {
   };
 
   const handleAnalyze = (id: number) => {
-    console.log("[DEBUG handleAnalyze] clicked, id=", id);
     setAnalyzingId(id);
-    console.log("[DEBUG handleAnalyze] setAnalyzingId done");
     analyzeSubject.mutate({ id });
-    console.log("[DEBUG handleAnalyze] mutate called");
   };
 
   const colors = [
@@ -512,7 +495,6 @@ export default function Subjects() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
-                      {(() => { console.log("[DEBUG render] subject.id=", subject.id, "status=", subject.status, "sourceContent=", !!subject.sourceContent, "analyzingId=", analyzingId); return null; })()}
                       {subject.status === "imported" && subject.sourceContent && (
                         <Button
                           variant="ghost"

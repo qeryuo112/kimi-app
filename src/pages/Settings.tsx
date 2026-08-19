@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useTheme } from "next-themes";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/providers/trpc";
 import { LOGIN_PATH } from "@/const";
@@ -23,7 +22,6 @@ import {
 } from "lucide-react";
 
 export default function SettingsPage() {
-  const { setTheme } = useTheme();
   const { isAuthenticated, user } = useAuth({
     redirectOnUnauthenticated: true,
     redirectPath: LOGIN_PATH,
@@ -57,21 +55,10 @@ export default function SettingsPage() {
     notifications: true,
   });
 
-  const [pwdForm, setPwdForm] = useState({
-    oldPassword: "",
-    newPassword: "",
-    confirmPassword: "",
-  });
-
   useEffect(() => {
-    console.log("[Theme-DEBUG] settings useEffect 触发:", { hasSettings: !!settings, theme: settings?.theme });
     if (settings) {
-      const theme = (settings.theme as "light" | "dark" | "system") || "dark";
-      console.log("[Theme-DEBUG] 从 settings 读取主题:", theme);
-      setTheme(theme);
-      console.log("[Theme-DEBUG] setTheme 已调用:", theme);
       setForm({
-        theme,
+        theme: (settings.theme as "light" | "dark" | "system") || "dark",
         language: settings.language || "zh-CN",
         aiModel: settings.aiModel || "glm-4.6v",
         aiApiKey: settings.aiApiKey || "",
@@ -84,7 +71,13 @@ export default function SettingsPage() {
         notifications: settings.notifications ?? true,
       });
     }
-  }, [settings, setTheme]);
+  }, [settings]);
+
+  const [pwdForm, setPwdForm] = useState({
+    oldPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
   const changePassword = trpc.auth.changePassword.useMutation({
     onSuccess: () => {
@@ -159,14 +152,7 @@ export default function SettingsPage() {
                             ? "border-primary bg-primary/10 text-primary"
                             : "border-border hover:bg-secondary"
                         }`}
-                        onClick={() => {
-                          console.log("[Theme-DEBUG] 点击主题按钮:", option.value);
-                          const newForm = { ...form, theme: option.value };
-                          setForm(newForm);
-                          setTheme(option.value);
-                          updateSettings.mutate(newForm);
-                          console.log("[Theme-DEBUG] setTheme + updateSettings 已调用:", option.value);
-                        }}
+                        onClick={() => setForm({ ...form, theme: option.value })}
                       >
                         <Icon className="h-4 w-4" />
                         <span className="text-sm">{option.label}</span>
@@ -235,9 +221,6 @@ export default function SettingsPage() {
                   <label className="text-sm font-medium">API Key</label>
                   <Input
                     type="password"
-                    autoComplete="off"
-                    data-1p-ignore
-                    data-form-type="other"
                     placeholder="sk-..."
                     value={form.aiApiKey}
                     onChange={(e) => setForm({ ...form, aiApiKey: e.target.value })}
@@ -387,62 +370,45 @@ export default function SettingsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleChangePassword();
-                }}
-                className="space-y-4"
-              >
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">原密码</label>
-                  <Input
-                    type="password"
-                    autoComplete="current-password"
-                    data-1p-ignore
-                    data-form-type="other"
-                    placeholder="请输入当前密码"
-                    value={pwdForm.oldPassword}
-                    onChange={(e) => setPwdForm({ ...pwdForm, oldPassword: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">新密码</label>
-                  <Input
-                    type="password"
-                    autoComplete="new-password"
-                    data-1p-ignore
-                    data-form-type="other"
-                    placeholder="至少6位"
-                    value={pwdForm.newPassword}
-                    onChange={(e) => setPwdForm({ ...pwdForm, newPassword: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">确认新密码</label>
-                  <Input
-                    type="password"
-                    autoComplete="new-password"
-                    data-1p-ignore
-                    data-form-type="other"
-                    placeholder="再次输入新密码"
-                    value={pwdForm.confirmPassword}
-                    onChange={(e) => setPwdForm({ ...pwdForm, confirmPassword: e.target.value })}
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="submit"
-                    disabled={changePassword.isPending}
-                    variant="outline"
-                  >
-                    {changePassword.isPending && (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    )}
-                    修改密码
-                  </Button>
-                </div>
-              </form>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">原密码</label>
+                <Input
+                  type="password"
+                  placeholder="请输入当前密码"
+                  value={pwdForm.oldPassword}
+                  onChange={(e) => setPwdForm({ ...pwdForm, oldPassword: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">新密码</label>
+                <Input
+                  type="password"
+                  placeholder="至少6位"
+                  value={pwdForm.newPassword}
+                  onChange={(e) => setPwdForm({ ...pwdForm, newPassword: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">确认新密码</label>
+                <Input
+                  type="password"
+                  placeholder="再次输入新密码"
+                  value={pwdForm.confirmPassword}
+                  onChange={(e) => setPwdForm({ ...pwdForm, confirmPassword: e.target.value })}
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  onClick={handleChangePassword}
+                  disabled={changePassword.isPending}
+                  variant="outline"
+                >
+                  {changePassword.isPending && (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  )}
+                  修改密码
+                </Button>
+              </div>
             </CardContent>
           </Card>
 

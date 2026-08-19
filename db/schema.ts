@@ -276,6 +276,7 @@ export const plans = mysqlTable("plans", {
   totalMonths: int("totalMonths").default(3).notNull(), // 计划总时长（月）
   reviewRounds: int("reviewRounds").default(3).notNull(), // 复习轮数
   aiPlan: text("aiPlan"), // AI生成的计划JSON
+  sourceDocumentUrl: text("sourceDocumentUrl"), // 上传的计划文件URL
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt")
     .defaultNow()
@@ -329,9 +330,8 @@ export type InsertQuestion = typeof questions.$inferInsert;
 export const userAnswers = mysqlTable("user_answers", {
   id: serial("id").primaryKey(),
   userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
-  questionId: varchar("questionId", { length: 50 }).notNull(),
+  questionId: bigint("questionId", { mode: "number", unsigned: true }).notNull(),
   userAnswer: text("userAnswer").notNull(), // 用户答案
-  imageUrls: text("imageUrls"), // 用户上传的图片URL列表(JSON数组)
   isCorrect: boolean("isCorrect").notNull(),
   score: int("score").default(0).notNull(), // 得分 0-100
   timeSpent: int("timeSpent"), // 答题用时(秒)
@@ -347,10 +347,6 @@ export const wrongAnswers = mysqlTable("wrong_answers", {
   userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
   questionId: bigint("questionId", { mode: "number", unsigned: true }).notNull(),
   userAnswer: text("userAnswer").notNull(),
-  imageUrls: text("imageUrls"), // 用户上传的图片URL列表(JSON数组)
-  questionContent: text("questionContent"), // 题目内容文本（用于错题本展示和查重）
-  correctAnswer: text("correctAnswer"), // 正确答案
-  options: text("options"), // 选项 JSON
   wrongCount: int("wrongCount").default(1).notNull(), // 错误次数
   lastWrongAt: timestamp("lastWrongAt").defaultNow().notNull(),
   mastered: boolean("mastered").default(false).notNull(), // 是否已掌握

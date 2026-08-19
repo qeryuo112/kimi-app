@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { questions, userAnswers, wrongAnswers, knowledgeNodes, userSettings, subjects } from "@db/schema";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { generateQuestions, generateQuestionsFromFileUrls, evaluateAnswer, recognizeQuestionsFromUrls, chatWithAI } from "./lib/ai";
 import type { KimiContent } from "./lib/ai";
 import { processUrlsToContentBlocks } from "./lib/document-processor";
@@ -56,12 +56,11 @@ export const questionRouter = createRouter({
         knowledgeContent: z.string().optional(),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("single_choice"),
         count: z.number().min(1).max(20).default(5),
-        difficulty: z.number().min(0).max(5).default(3),
+        difficulty: z.number().min(1).max(5).default(3),
         subjectId: z.number().optional(),
         nodeId: z.number().optional(),
         skillId: z.number().optional(),
         requireChemicalStructure: z.boolean().optional(),
-        customInstructions: z.string().max(500).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -92,8 +91,7 @@ export const questionRouter = createRouter({
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined,
-        input.requireChemicalStructure || false,
-        input.customInstructions
+        input.requireChemicalStructure || false
       );
 
       // 获取用户的学科和知识点列表，用于AI识别匹配
@@ -107,42 +105,37 @@ export const questionRouter = createRouter({
         .from(knowledgeNodes)
         .where(eq(knowledgeNodes.userId, ctx.user.id));
 
-      // 保存题目到数据库（严格校验：标签必须来自已有科目/知识点）
+      // 保存题目到数据库
       const savedQuestions = [];
       console.log("[question.aiGenerate] 开始保存题目", { count: result.questions.length, firstQuestion: result.questions[0] });
       for (const q of result.questions) {
-        // 尝试根据AI识别的学科和知识点匹配本地数据（精确匹配，不允许编造）
+        // 尝试根据AI识别的学科和知识点匹配本地数据
         let matchedSubjectId = input.subjectId;
         let matchedNodeId = input.nodeId;
-        let finalDetectedSubject: string | null = q.detectedSubject || null;
-        let finalDetectedKnowledgePoint: string | null = q.detectedKnowledgePoint || null;
 
-        // 用户手动设置的标签优先；未设置时，AI返回的标签保留原始值
         if (!matchedSubjectId && q.detectedSubject) {
-          const normalized = q.detectedSubject.trim().toLowerCase();
-          const matchedSubject = userSubjects.find(s => s.title.trim().toLowerCase() === normalized);
+          // 尝试匹配学科名称（模糊匹配）
+          const matchedSubject = userSubjects.find(
+            s => s.title.toLowerCase().includes(q.detectedSubject!.toLowerCase()) ||
+                 q.detectedSubject!.toLowerCase().includes(s.title.toLowerCase())
+          );
           if (matchedSubject) {
             matchedSubjectId = matchedSubject.id;
-            finalDetectedSubject = matchedSubject.title;
-          } else {
-            // 精确匹配失败，保留AI原始值（用户后续可批量修改）
-            console.log("[question.aiGenerate] 学科标签未匹配，保留AI原始值", { detectedSubject: q.detectedSubject });
           }
         }
 
         if (!matchedNodeId && q.detectedKnowledgePoint) {
-          const normalized = q.detectedKnowledgePoint.trim().toLowerCase();
-          const matchedNode = userNodes.find(n => n.title.trim().toLowerCase() === normalized);
+          // 尝试匹配知识点名称（模糊匹配）
+          const matchedNode = userNodes.find(
+            n => n.title.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
+                 q.detectedKnowledgePoint!.toLowerCase().includes(n.title.toLowerCase())
+          );
           if (matchedNode) {
             matchedNodeId = matchedNode.id;
-            finalDetectedKnowledgePoint = matchedNode.title;
             // 如果匹配到知识点但没有匹配到学科，使用知识点的学科
             if (!matchedSubjectId) {
               matchedSubjectId = matchedNode.subjectId;
             }
-          } else {
-            // 精确匹配失败，保留AI原始值（用户后续可批量修改）
-            console.log("[question.aiGenerate] 知识点标签未匹配，保留AI原始值", { detectedKnowledgePoint: q.detectedKnowledgePoint });
           }
         }
 
@@ -159,15 +152,13 @@ export const questionRouter = createRouter({
           difficulty: q.difficulty,
           imageUrl: q.imageUrl || null,
           aiGenerated: true,
-          detectedSubject: finalDetectedSubject,
-          detectedKnowledgePoint: finalDetectedKnowledgePoint,
+          detectedSubject: q.detectedSubject || null,
+          detectedKnowledgePoint: q.detectedKnowledgePoint || null,
           smiles: (q as any).smiles || null,
           inchi: (q as any).inchi || null,
         };
         console.log("[question.aiGenerate] 准备插入题目", {
           content: q.content?.slice(0, 50),
-          hasBackslashChem: q.content?.includes("\\chem"),
-          hasBelChem: q.content?.includes("\x07chem"),
           optionsType: typeof q.options,
           options: q.options,
           optionsJson: insertValues.options,
@@ -205,12 +196,11 @@ export const questionRouter = createRouter({
         urls: z.array(z.string().url()).min(1).max(5),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("single_choice"),
         count: z.number().min(1).max(20).default(5),
-        difficulty: z.number().min(0).max(5).default(3),
+        difficulty: z.number().min(1).max(5).default(3),
         subjectId: z.number().optional(),
         nodeId: z.number().optional(),
         skillId: z.number().optional(),
         requireChemicalStructure: z.boolean().optional(),
-        customInstructions: z.string().max(500).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -228,8 +218,7 @@ export const questionRouter = createRouter({
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined,
-        input.requireChemicalStructure || false,
-        input.customInstructions
+        input.requireChemicalStructure || false
       );
 
       // 获取用户的学科和知识点列表，用于AI识别匹配
@@ -243,48 +232,36 @@ export const questionRouter = createRouter({
         .from(knowledgeNodes)
         .where(eq(knowledgeNodes.userId, ctx.user.id));
 
-      // 保存题目到数据库（严格校验：标签必须来自已有科目/知识点）
+      // 保存题目到数据库
       const savedQuestions = [];
       for (const q of result.questions) {
-        // 尝试根据AI识别的学科和知识点匹配本地数据（精确匹配，不允许编造）
+        // 尝试根据AI识别的学科和知识点匹配本地数据
         let matchedSubjectId = input.subjectId;
         let matchedNodeId = input.nodeId;
-        let finalDetectedSubject: string | null = q.detectedSubject || null;
-        let finalDetectedKnowledgePoint: string | null = q.detectedKnowledgePoint || null;
 
-        // 用户手动设置的标签优先；未设置时，AI返回的标签保留原始值
         if (!matchedSubjectId && q.detectedSubject) {
-          const normalized = q.detectedSubject.trim().toLowerCase();
-          const matchedSubject = userSubjects.find(s => s.title.trim().toLowerCase() === normalized);
+          const matchedSubject = userSubjects.find(
+            s => s.title.toLowerCase().includes(q.detectedSubject!.toLowerCase()) ||
+                 q.detectedSubject!.toLowerCase().includes(s.title.toLowerCase())
+          );
           if (matchedSubject) {
             matchedSubjectId = matchedSubject.id;
-            finalDetectedSubject = matchedSubject.title;
-          } else {
-            // 精确匹配失败，保留AI原始值（用户后续可批量修改）
-            console.log("[question.aiGenerateFromUrls] 学科标签未匹配，保留AI原始值", { detectedSubject: q.detectedSubject });
           }
         }
 
         if (!matchedNodeId && q.detectedKnowledgePoint) {
-          const normalized = q.detectedKnowledgePoint.trim().toLowerCase();
-          const matchedNode = userNodes.find(n => n.title.trim().toLowerCase() === normalized);
+          const matchedNode = userNodes.find(
+            n => n.title.toLowerCase().includes(q.detectedKnowledgePoint!.toLowerCase()) ||
+                 q.detectedKnowledgePoint!.toLowerCase().includes(n.title.toLowerCase())
+          );
           if (matchedNode) {
             matchedNodeId = matchedNode.id;
-            finalDetectedKnowledgePoint = matchedNode.title;
             if (!matchedSubjectId) {
               matchedSubjectId = matchedNode.subjectId;
             }
-          } else {
-            // 精确匹配失败，保留AI原始值（用户后续可批量修改）
-            console.log("[question.aiGenerateFromUrls] 知识点标签未匹配，保留AI原始值", { detectedKnowledgePoint: q.detectedKnowledgePoint });
           }
         }
 
-        console.log("[question.aiGenerateFromUrls] 准备插入题目", {
-          content: q.content?.slice(0, 50),
-          hasBackslashChem: q.content?.includes("\\chem"),
-          hasBelChem: q.content?.includes("\x07chem"),
-        });
         const [{ id }] = await db
           .insert(questions)
           .values({
@@ -300,8 +277,8 @@ export const questionRouter = createRouter({
             difficulty: q.difficulty,
             imageUrl: q.imageUrl || null,
             aiGenerated: true,
-            detectedSubject: finalDetectedSubject,
-            detectedKnowledgePoint: finalDetectedKnowledgePoint,
+            detectedSubject: q.detectedSubject || null,
+            detectedKnowledgePoint: q.detectedKnowledgePoint || null,
           })
           .$returningId();
 
@@ -377,11 +354,6 @@ export const questionRouter = createRouter({
           }
         }
 
-        console.log("[question.aiGenerateFromUrls] 准备插入题目", {
-          content: q.content?.slice(0, 50),
-          hasBackslashChem: q.content?.includes("\\chem"),
-          hasBelChem: q.content?.includes("\x07chem"),
-        });
         const [{ id }] = await db
           .insert(questions)
           .values({
@@ -417,28 +389,13 @@ export const questionRouter = createRouter({
         options: z.string().optional(),
         correctAnswer: z.string().optional(),
         explanation: z.string().optional(),
-        difficulty: z.number().min(0).max(5).optional(),
+        difficulty: z.number().min(1).max(5).optional(),
         imageUrl: z.string().nullable().optional(),
-        subjectId: z.number().optional(),
-        nodeId: z.number().optional(),
-        skillId: z.number().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
       console.log("[question.update] 开始", { questionId: input.id, userId: ctx.user.id });
-      console.log("[question.update] input 详情", {
-        contentLength: input.content?.length,
-        optionsLength: input.options?.length,
-        optionsPreview: input.options?.slice(0, 200),
-        correctAnswerLength: input.correctAnswer?.length,
-        explanationLength: input.explanation?.length,
-        difficulty: input.difficulty,
-        imageUrl: input.imageUrl,
-        subjectId: input.subjectId,
-        nodeId: input.nodeId,
-        skillId: input.skillId,
-      });
 
       // 查询现有题目
       const [existing] = await db
@@ -465,15 +422,6 @@ export const questionRouter = createRouter({
       if (input.explanation !== undefined) updateData.explanation = input.explanation;
       if (input.difficulty !== undefined) updateData.difficulty = input.difficulty;
       if (input.imageUrl !== undefined) updateData.imageUrl = input.imageUrl;
-      if (input.subjectId !== undefined) updateData.subjectId = input.subjectId;
-      if (input.nodeId !== undefined) updateData.nodeId = input.nodeId;
-      if (input.skillId !== undefined) updateData.skillId = input.skillId;
-
-      console.log("[question.update] updateData 构建完成", {
-        keys: Object.keys(updateData),
-        optionsLength: updateData.options?.length,
-        optionsPreview: updateData.options?.slice(0, 200),
-      });
 
       // 合并后的题目数据（用于判断是否需要AI重生成）
       const mergedContent = input.content !== undefined ? input.content : existing.content;
@@ -583,22 +531,12 @@ export const questionRouter = createRouter({
 
       console.log("[question.update] 最终更新数据", { keys: Object.keys(updateData) });
 
-      try {
-        await db
-          .update(questions)
-          .set(updateData)
-          .where(and(eq(questions.id, input.id), eq(questions.userId, ctx.user.id)));
-        console.log("[question.update] 数据库更新完成");
-      } catch (dbErr: any) {
-        console.error("[question.update] 数据库更新失败", {
-          message: dbErr?.message,
-          code: dbErr?.code,
-          sqlState: dbErr?.sqlState,
-          stack: dbErr?.stack,
-          updateDataKeys: Object.keys(updateData),
-        });
-        throw new Error(`保存失败: ${dbErr?.message || "数据库错误"}`);
-      }
+      await db
+        .update(questions)
+        .set(updateData)
+        .where(and(eq(questions.id, input.id), eq(questions.userId, ctx.user.id)));
+
+      console.log("[question.update] 数据库更新完成");
 
       // 查询更新后的题目返回
       const [updated] = await db
@@ -635,73 +573,17 @@ export const questionRouter = createRouter({
     .input(z.object({ ids: z.array(z.number()).min(1) }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const ids = input.ids;
-      const idStrs = ids.map(String);
-
-      console.log("[DEBUG deleteMany] start", { userId: ctx.user.id, count: ids.length, ids });
-
-      try {
-        // 批量删除关联答题记录
-        const userAnswersResult = await db
+      for (const id of input.ids) {
+        await db
           .delete(userAnswers)
-          .where(and(inArray(userAnswers.questionId, idStrs), eq(userAnswers.userId, ctx.user.id)));
-        console.log("[DEBUG deleteMany] userAnswers deleted", { affectedRows: userAnswersResult?.[0]?.affectedRows });
-
-        // 批量删除关联错题记录
-        const wrongAnswersResult = await db
+          .where(and(eq(userAnswers.questionId, id), eq(userAnswers.userId, ctx.user.id)));
+        await db
           .delete(wrongAnswers)
-          .where(and(inArray(wrongAnswers.questionId, idStrs), eq(wrongAnswers.userId, ctx.user.id)));
-        console.log("[DEBUG deleteMany] wrongAnswers deleted", { affectedRows: wrongAnswersResult?.[0]?.affectedRows });
-
-        // 批量删除题目
-        const questionsResult = await db
+          .where(and(eq(wrongAnswers.questionId, id), eq(wrongAnswers.userId, ctx.user.id)));
+        await db
           .delete(questions)
-          .where(and(inArray(questions.id, ids), eq(questions.userId, ctx.user.id)));
-        console.log("[DEBUG deleteMany] questions deleted", { affectedRows: questionsResult?.[0]?.affectedRows });
-
-        return { success: true, count: ids.length };
-      } catch (err) {
-        console.error("[DEBUG deleteMany] FAILED", {
-          error: err instanceof Error ? err.message : String(err),
-          ids,
-        });
-        throw err;
+          .where(and(eq(questions.id, id), eq(questions.userId, ctx.user.id)));
       }
-    }),
-
-  // 批量修改题目标签
-  updateMany: authedQuery
-    .input(
-      z.object({
-        ids: z.array(z.number()).min(1),
-        subjectId: z.number().optional(),
-        nodeId: z.number().optional(),
-        skillId: z.number().optional(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const db = getDb();
-
-      // 校验所有题目属于当前用户
-      const existing = await db
-        .select()
-        .from(questions)
-        .where(and(inArray(questions.id, input.ids), eq(questions.userId, ctx.user.id)));
-
-      if (existing.length !== input.ids.length) {
-        throw new Error("部分题目不存在或无权限");
-      }
-
-      const updateData: Partial<typeof questions.$inferInsert> = {};
-      if (input.subjectId !== undefined) updateData.subjectId = input.subjectId;
-      if (input.nodeId !== undefined) updateData.nodeId = input.nodeId;
-      if (input.skillId !== undefined) updateData.skillId = input.skillId;
-
-      await db
-        .update(questions)
-        .set(updateData)
-        .where(and(inArray(questions.id, input.ids), eq(questions.userId, ctx.user.id)));
-
       return { success: true, count: input.ids.length };
     }),
 
@@ -711,7 +593,6 @@ export const questionRouter = createRouter({
       z.object({
         questionId: z.number(),
         userAnswer: z.string(),
-        imageUrls: z.array(z.string()).optional(),
         timeSpent: z.number().optional(), // 秒
       })
     )
@@ -737,7 +618,6 @@ export const questionRouter = createRouter({
         question.correctAnswer,
         input.userAnswer,
         question.questionType,
-        input.imageUrls,
         setting?.aiApiKey || undefined,
         setting?.aiApiEndpoint || undefined,
         setting?.aiModel || undefined
@@ -750,77 +630,65 @@ export const questionRouter = createRouter({
           userId: ctx.user.id,
           questionId: input.questionId,
           userAnswer: input.userAnswer,
-          imageUrls: input.imageUrls ? JSON.stringify(input.imageUrls) : null,
           isCorrect: evaluation.isCorrect,
           score: evaluation.score,
           timeSpent: input.timeSpent,
         })
         .$returningId();
 
-      // 如果答错，加入错题本（失败不阻断主流程）
-      try {
-        if (!evaluation.isCorrect) {
-          console.log("[DEBUG wrongAnswers submitAnswer] processing wrong answer", { questionId: input.questionId });
-          const existing = await db
-            .select()
-            .from(wrongAnswers)
-            .where(
-              and(
-                eq(wrongAnswers.userId, ctx.user.id),
-                eq(wrongAnswers.questionId, input.questionId)
-              )
-            );
+      // 如果答错，加入错题本
+      if (!evaluation.isCorrect) {
+        const existing = await db
+          .select()
+          .from(wrongAnswers)
+          .where(
+            and(
+              eq(wrongAnswers.userId, ctx.user.id),
+              eq(wrongAnswers.questionId, input.questionId)
+            )
+          );
 
-          if (existing.length > 0) {
-            await db
-              .update(wrongAnswers)
-              .set({
-                wrongCount: existing[0].wrongCount + 1,
-                lastWrongAt: new Date(),
-                userAnswer: input.userAnswer,
-                mastered: false,
-              })
-              .where(eq(wrongAnswers.id, existing[0].id));
-            console.log("[DEBUG wrongAnswers submitAnswer] updated existing");
-          } else {
-            await db.insert(wrongAnswers).values({
-              userId: ctx.user.id,
-              questionId: input.questionId,
-              userAnswer: input.userAnswer,
-              imageUrls: input.imageUrls ? JSON.stringify(input.imageUrls) : null,
-              wrongCount: 1,
+        if (existing.length > 0) {
+          await db
+            .update(wrongAnswers)
+            .set({
+              wrongCount: existing[0].wrongCount + 1,
               lastWrongAt: new Date(),
+              userAnswer: input.userAnswer,
               mastered: false,
-            });
-            console.log("[DEBUG wrongAnswers submitAnswer] inserted new");
-          }
+            })
+            .where(eq(wrongAnswers.id, existing[0].id));
         } else {
-          // 如果答对，更新错题本中的复习次数
-          const existing = await db
-            .select()
-            .from(wrongAnswers)
-            .where(
-              and(
-                eq(wrongAnswers.userId, ctx.user.id),
-                eq(wrongAnswers.questionId, input.questionId)
-              )
-            );
-
-          if (existing.length > 0) {
-            await db
-              .update(wrongAnswers)
-              .set({
-                reviewCount: existing[0].reviewCount + 1,
-                mastered: existing[0].reviewCount >= 2, // 复习2次后标记为掌握
-              })
-              .where(eq(wrongAnswers.id, existing[0].id));
-          }
+          await db.insert(wrongAnswers).values({
+            userId: ctx.user.id,
+            questionId: input.questionId,
+            userAnswer: input.userAnswer,
+            wrongCount: 1,
+            lastWrongAt: new Date(),
+            mastered: false,
+          });
         }
-      } catch (err) {
-        console.error("[DEBUG wrongAnswers submitAnswer] FAILED", {
-          error: err instanceof Error ? err.message : String(err),
-          questionId: input.questionId,
-        });
+      } else {
+        // 如果答对，更新错题本中的复习次数
+        const existing = await db
+          .select()
+          .from(wrongAnswers)
+          .where(
+            and(
+              eq(wrongAnswers.userId, ctx.user.id),
+              eq(wrongAnswers.questionId, input.questionId)
+            )
+          );
+
+        if (existing.length > 0) {
+          await db
+            .update(wrongAnswers)
+            .set({
+              reviewCount: existing[0].reviewCount + 1,
+              mastered: existing[0].reviewCount >= 2, // 复习2次后标记为掌握
+            })
+            .where(eq(wrongAnswers.id, existing[0].id));
+        }
       }
 
       return {
@@ -871,21 +739,10 @@ export const questionRouter = createRouter({
 
       const qMap = new Map(qs.map((q) => [q.id, q]));
 
-      return wrongs.map((w) => {
-        const q = qMap.get(w.questionId);
-        return {
-          ...w,
-          question: q || {
-            id: w.questionId,
-            content: w.questionContent || "（题目内容缺失）",
-            correctAnswer: w.correctAnswer || "",
-            explanation: "",
-            questionType: "fill_blank",
-            options: w.options ? JSON.parse(w.options) : [],
-            difficulty: 3,
-          },
-        };
-      });
+      return wrongs.map((w) => ({
+        ...w,
+        question: qMap.get(w.questionId) || null,
+      }));
     }),
 
   // 标记错题为已掌握

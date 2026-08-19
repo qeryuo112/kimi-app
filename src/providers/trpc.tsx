@@ -11,7 +11,6 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: false,
-      refetchOnWindowFocus: false,
     },
     mutations: {
       retry: false,
@@ -24,17 +23,11 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      // 通过 maxURLLength 间接控制超时不太可行，改用 fetch 选项
       fetch(input, init) {
-        console.log("[tRPC fetch]", input, "credentials=include");
         return globalThis.fetch(input, {
           ...(init ?? {}),
           credentials: "include",
-        }).then((res) => {
-          console.log("[tRPC fetch] response:", res.status, input);
-          return res;
-        }).catch((err) => {
-          console.error("[tRPC fetch] error:", err, input);
-          throw err;
         });
       },
     }),

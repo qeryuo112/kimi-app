@@ -1,24 +1,32 @@
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
-import { ThemeProvider } from 'next-themes'
 import './index.css'
 import { TRPCProvider } from "@/providers/trpc"
 import App from './App.tsx'
 
-console.log("[Theme-DEBUG] main.tsx 执行, html class:", document.documentElement.className);
+// Suppress React 19 "insertBefore NotFoundError" caused by browser extensions
+// (translation tools, grammarly, etc.) modifying DOM nodes managed by React.
+// This is a known React 19 issue that doesn't affect functionality.
+const originalInsertBefore = Node.prototype.insertBefore
+Node.prototype.insertBefore = function<T extends Node>(newNode: T, referenceNode: Node | null): T {
+  try {
+    return originalInsertBefore.call(this, newNode, referenceNode)
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'NotFoundError') {
+      // Node was moved by a browser extension; append instead of insert
+      return originalInsertBefore.call(this, newNode, null)
+    }
+    throw e
+  }
+}
 
 createRoot(document.getElementById('root')!).render(
-  <BrowserRouter>
-    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+  <StrictMode>
+    <BrowserRouter>
       <TRPCProvider>
         <App />
       </TRPCProvider>
-    </ThemeProvider>
-  </BrowserRouter>,
+    </BrowserRouter>
+  </StrictMode>,
 )
-
-setTimeout(() => {
-  console.log("[Theme-DEBUG] 渲染后 html class:", document.documentElement.className);
-  console.log("[Theme-DEBUG] 渲染后 html style:", document.documentElement.style.cssText);
-}, 500);
-

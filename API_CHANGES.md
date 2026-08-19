@@ -117,3 +117,41 @@ git revert HEAD
 ```
 
 或手动恢复被删除的文件和代码。
+
+---
+
+## 五、新增计划文件上传解析功能（2026-08-19）
+
+### 新增 AI 函数
+- `api/lib/ai.ts` — 新增 `analyzePlanFromFile`
+  - 接收上传文件 URL、已有科目列表、本地知识树节点
+  - 调用多模态 AI 解析计划文档，生成 kimiokc 标准计划 JSON
+  - 返回 `rounds` / `months` / `weeks` / `days` / `unmatchedContent`
+
+### 修改的文件
+- `api/plan-router.ts` — 新增 `plan.aiGenerateFromPlanFile` mutation
+  - 接收 `planId`、`subjectIds`、`fileUrl`、`requirements`
+  - 验证科目属于当前用户且已关联到计划
+  - 拉取本地知识树并调用 `analyzePlanFromFile`
+  - 保存结果到 `plans.aiPlan`，同时记录 `sourceDocumentUrl`
+- `db/schema.ts` — `plans` 表新增 `sourceDocumentUrl` 字段
+- `src/pages/Plans.tsx` — 新增"上传计划文件"入口和对话框
+  - 支持选择已有科目
+  - 支持上传 PDF / Word / TXT / Markdown / 图片 等格式
+  - 显示上传文件列表、填写额外需求、提交 AI 解析
+
+### 新增的 tRPC 端点
+| 端点 | 说明 |
+|------|------|
+| `plan.aiGenerateFromPlanFile` | 上传计划文件，AI 结合已有科目知识树生成标准复习计划 |
+
+### 数据库迁移
+- `db/migrations/0012_lazy_nightmare.sql` — plans 表新增 sourceDocumentUrl 列
+
+### 注意事项
+- 上传的计划文件必须对应已存在的科目，AI 不会自动创建新科目
+- AI 生成的每日任务 `knowledgeNodes` 字段使用本地已有节点的 title
+- 未能匹配到知识节点的内容会记录在返回结果的 `unmatchedContent` 中
+
+### 待处理
+- 当前生成的是完整计划（轮次/月/周/日），如需增量生成（仅月/周/日），可复用 `analyzePlanFromFile` 拆分提示词

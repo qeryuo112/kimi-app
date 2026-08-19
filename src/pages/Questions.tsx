@@ -50,16 +50,8 @@ export default function Questions() {
   const [showRecognize, setShowRecognize] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
   const [userAnswer, setUserAnswer] = useState("");
-  const [answerImageUrls, setAnswerImageUrls] = useState<string[]>([]);
   const [answerResult, setAnswerResult] = useState<any>(null);
-  const [isAnswerImageUploading, setIsAnswerImageUploading] = useState(false);
   const [selectedQuestions, setSelectedQuestions] = useState<Set<number>>(new Set());
-  const [showBatchEdit, setShowBatchEdit] = useState(false);
-  const [batchEditForm, setBatchEditForm] = useState({
-    subjectId: undefined as number | undefined,
-    nodeId: undefined as number | undefined,
-    skillId: undefined as number | undefined,
-  });
 
   const [genForm, setGenForm] = useState({
     topic: "",
@@ -68,7 +60,6 @@ export default function Questions() {
     count: 5,
     difficulty: 3,
     requireChemicalStructure: false,
-    customInstructions: "",
   });
 
   // AI出题模式切换：text | file
@@ -108,7 +99,6 @@ export default function Questions() {
   // 获取学科和知识点列表，用于显示关联信息
   const { data: subjects } = trpc.subject.list.useQuery();
   const { data: knowledgeNodes } = trpc.knowledge.list.useQuery();
-  const { data: skills } = trpc.skill.list.useQuery();
 
   // 获取试卷列表
   const { data: examPapers } = trpc.exam.list.useQuery();
@@ -120,13 +110,6 @@ export default function Questions() {
   // AI从文件出题
   const aiGenerateFromUrls = trpc.question.aiGenerateFromUrls.useMutation({
     onSuccess: (data) => {
-      const firstQ = data.questions?.[0];
-      console.log("[FRONTEND aiGenerateFromUrls] onSuccess", {
-        count: data.questions?.length,
-        firstContent: firstQ?.content?.slice(0, 50),
-        hasBackslashChem: firstQ?.content?.includes("\\chem"),
-        hasBelChem: firstQ?.content?.includes("\x07chem"),
-      });
       toast.success(`成功生成 ${data.questions?.length || 0} 道题目`);
       utils.question.list.invalidate();
       setShowGenerate(false);
@@ -154,13 +137,6 @@ export default function Questions() {
   // AI出题
   const aiGenerate = trpc.question.aiGenerate.useMutation({
     onSuccess: (data) => {
-      const firstQ = data.questions?.[0];
-      console.log("[FRONTEND aiGenerate] onSuccess", {
-        count: data.questions?.length,
-        firstContent: firstQ?.content?.slice(0, 50),
-        hasBackslashChem: firstQ?.content?.includes("\\chem"),
-        hasBelChem: firstQ?.content?.includes("\x07chem"),
-      });
       toast.success(`成功生成 ${data.questions?.length || 0} 道题目`);
       utils.question.list.invalidate();
       setShowGenerate(false);
@@ -175,7 +151,6 @@ export default function Questions() {
   const submitAnswer = trpc.question.submitAnswer.useMutation({
     onSuccess: (data) => {
       setAnswerResult(data);
-      setAnswerImageUrls([]);
       utils.question.getStats.invalidate();
       utils.question.getWrongAnswers.invalidate();
     },
@@ -213,20 +188,6 @@ export default function Questions() {
       utils.question.getWrongAnswers.invalidate();
       setSelectedQuestions(new Set());
       toast.success(`已删除 ${data.count} 道题目`);
-    },
-  });
-
-  // 批量修改标签
-  const updateManyQuestions = trpc.question.updateMany.useMutation({
-    onSuccess: (data) => {
-      utils.question.list.invalidate();
-      utils.question.getStats.invalidate();
-      setShowBatchEdit(false);
-      setBatchEditForm({ subjectId: undefined, nodeId: undefined, skillId: undefined });
-      toast.success(`已更新 ${data.count} 道题目标签`);
-    },
-    onError: (err) => {
-      toast.error(err.message || "批量更新失败");
     },
   });
 
@@ -309,9 +270,6 @@ export default function Questions() {
     explanation: "",
     difficulty: 3,
     imageUrl: "",
-    subjectId: undefined as number | undefined,
-    nodeId: undefined as number | undefined,
-    skillId: undefined as number | undefined,
   });
   const [editOptions, setEditOptions] = useState<Array<{ label: string; text: string }>>([]);
   const [isEditImageUploading, setIsEditImageUploading] = useState(false);
@@ -325,9 +283,6 @@ export default function Questions() {
       explanation: q.explanation || "",
       difficulty: q.difficulty,
       imageUrl: q.imageUrl || "",
-      subjectId: q.subjectId ?? undefined,
-      nodeId: q.nodeId ?? undefined,
-      skillId: q.skillId ?? undefined,
     });
     // 解析选项
     try {
@@ -348,9 +303,6 @@ export default function Questions() {
       explanation: editForm.explanation,
       difficulty: editForm.difficulty,
       imageUrl: editForm.imageUrl || null,
-      subjectId: editForm.subjectId,
-      nodeId: editForm.nodeId,
-      skillId: editForm.skillId,
     });
   };
 
@@ -420,7 +372,6 @@ export default function Questions() {
         count: genForm.count,
         difficulty: genForm.difficulty,
         requireChemicalStructure: genForm.requireChemicalStructure,
-        customInstructions: genForm.customInstructions,
       });
     }
   };
@@ -520,37 +471,11 @@ export default function Questions() {
     });
   };
 
-  const handleAnswerImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setIsAnswerImageUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    try {
-      const res = await fetch("/upload", { method: "POST", body: formData });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(`上传失败: ${err.error || res.statusText}`);
-        return;
-      }
-      const data = await res.json();
-      if (data.url) {
-        setAnswerImageUrls((prev) => [...prev, data.url]);
-        toast.success("图片上传成功");
-      }
-    } catch (err: any) {
-      toast.error(`上传失败: ${err.message}`);
-    } finally {
-      setIsAnswerImageUploading(false);
-    }
-  };
-
   const handleAnswer = () => {
-    if (!currentQuestion || (!userAnswer.trim() && answerImageUrls.length === 0)) return;
+    if (!currentQuestion || !userAnswer.trim()) return;
     submitAnswer.mutate({
       questionId: currentQuestion.id,
       userAnswer: userAnswer.trim(),
-      imageUrls: answerImageUrls.length > 0 ? answerImageUrls : undefined,
     });
   };
 
@@ -564,7 +489,6 @@ export default function Questions() {
   };
 
   const difficultyMap: Record<number, { label: string; color: string }> = {
-    0: { label: "混合难度", color: "bg-purple-500/20 text-purple-400" },
     1: { label: "简单", color: "bg-green-500/20 text-green-400" },
     2: { label: "较易", color: "bg-emerald-500/20 text-emerald-400" },
     3: { label: "中等", color: "bg-yellow-500/20 text-yellow-400" },
@@ -689,7 +613,7 @@ export default function Questions() {
             {isShowingAnswer && (
               <div className="text-sm text-muted-foreground">
                 <span className="font-medium text-green-400">答案：</span>
-                <MathContent content={q.correctAnswer} />
+                {q.correctAnswer}
               </div>
             )}
           </div>
@@ -835,54 +759,6 @@ export default function Questions() {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-sm font-medium">科目</label>
-                <Select
-                  value={editForm.subjectId ? String(editForm.subjectId) : "none"}
-                  onValueChange={(v) => setEditForm({ ...editForm, subjectId: v === "none" ? undefined : parseInt(v) })}
-                >
-                  <SelectTrigger><SelectValue placeholder="选择科目" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">无</SelectItem>
-                    {subjects?.map((s) => (
-                      <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-sm font-medium">知识点</label>
-                <Select
-                  value={editForm.nodeId ? String(editForm.nodeId) : "none"}
-                  onValueChange={(v) => setEditForm({ ...editForm, nodeId: v === "none" ? undefined : parseInt(v) })}
-                >
-                  <SelectTrigger><SelectValue placeholder="选择知识点" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">无</SelectItem>
-                    {knowledgeNodes?.map((n) => (
-                      <SelectItem key={n.id} value={String(n.id)}>{n.title}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-sm font-medium">技能维度</label>
-                <Select
-                  value={editForm.skillId ? String(editForm.skillId) : "none"}
-                  onValueChange={(v) => setEditForm({ ...editForm, skillId: v === "none" ? undefined : parseInt(v) })}
-                >
-                  <SelectTrigger><SelectValue placeholder="选择技能" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">无</SelectItem>
-                    {skills?.map((s) => (
-                      <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
             <div>
               <label className="text-sm font-medium">难度</label>
               <Select
@@ -891,7 +767,6 @@ export default function Questions() {
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="0">混合难度</SelectItem>
                   <SelectItem value="1">简单</SelectItem>
                   <SelectItem value="2">较易</SelectItem>
                   <SelectItem value="3">中等</SelectItem>
@@ -1232,16 +1107,6 @@ export default function Questions() {
               </>
             )}
 
-            <div>
-              <label className="text-sm font-medium">出题要求（可选）</label>
-              <Textarea
-                placeholder="如：偏向考研真题风格、注重计算能力、增加案例分析题、只出选择题..."
-                value={genForm.customInstructions}
-                onChange={(e) => setGenForm({ ...genForm, customInstructions: e.target.value })}
-                className="min-h-[60px]"
-              />
-            </div>
-
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-sm font-medium">题型</label>
@@ -1281,7 +1146,6 @@ export default function Questions() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="0">混合难度</SelectItem>
                     <SelectItem value="1">简单</SelectItem>
                     <SelectItem value="2">较易</SelectItem>
                     <SelectItem value="3">中等</SelectItem>
@@ -1477,7 +1341,7 @@ export default function Questions() {
                         </div>
                       )}
                       <div className="text-sm text-muted-foreground">
-                        <span className="font-medium text-green-400">答案：</span><MathContent content={q.correctAnswer} />
+                        <span className="font-medium text-green-400">答案：</span>{q.correctAnswer}
                       </div>
                       {q.explanation && (
                         <div className="text-sm text-muted-foreground mt-1">
@@ -1522,109 +1386,75 @@ export default function Questions() {
                 多选题：可选择多个答案
               </p>
             )}
-            {(() => {
-              let opts: any[] = [];
-              let hasOpts = false;
-              if (currentQuestion.options) {
-                try {
-                  const parsed = JSON.parse(currentQuestion.options);
-                  if (Array.isArray(parsed) && parsed.length > 0) {
-                    opts = parsed;
-                    hasOpts = true;
+            {currentQuestion.options && (
+              <div className="space-y-2">
+                {(() => {
+                  try {
+                    const opts = JSON.parse(currentQuestion.options);
+                    const isMultiple = currentQuestion.questionType === "multiple_choice";
+                    // 多选题答案解析为数组
+                    const selectedLabels = isMultiple
+                      ? userAnswer.split("").filter(Boolean)
+                      : [userAnswer].filter(Boolean);
+
+                    const toggleOption = (label: string) => {
+                      if (isMultiple) {
+                        // 多选题：切换选中状态
+                        const newLabels = selectedLabels.includes(label)
+                          ? selectedLabels.filter((l) => l !== label)
+                          : [...selectedLabels, label].sort();
+                        setUserAnswer(newLabels.join(""));
+                      } else {
+                        // 单选题：直接替换
+                        setUserAnswer(label);
+                      }
+                    };
+
+                    return opts.map((opt: any) => {
+                      const isSelected = selectedLabels.includes(opt.label);
+                      return (
+                        <button
+                          key={opt.label}
+                          onClick={() => toggleOption(opt.label)}
+                          className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                            isSelected
+                              ? "border-primary bg-primary/10"
+                              : "border-border hover:bg-secondary/30"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <span className={`font-medium mr-2 ${isSelected ? "text-primary" : ""}`}>
+                              {isMultiple && (
+                                <span className={`inline-flex items-center justify-center w-5 h-5 border rounded ${isSelected ? "bg-primary border-primary text-white" : "border-border"}`}>
+                                  {isSelected && "✓"}
+                                </span>
+                              )}
+                              {!isMultiple && `${opt.label}.`}
+                            </span>
+                            <MathContent content={opt.text} />
+                          </div>
+                        </button>
+                      );
+                    });
+                  } catch {
+                    return null;
                   }
-                } catch { /* ignore */ }
-              }
-
-              if (!hasOpts) {
-                return (
-                  <div className="space-y-2">
-                    <Textarea
-                      placeholder="请输入你的答案"
-                      value={userAnswer}
-                      onChange={(e) => setUserAnswer(e.target.value)}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      {answerImageUrls.map((url, i) => (
-                        <div key={i} className="relative group">
-                          <img src={url} alt="" className="h-16 w-16 object-cover rounded border" />
-                          <button
-                            onClick={() => setAnswerImageUrls((prev) => prev.filter((_, idx) => idx !== i))}
-                            className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                      <label className="cursor-pointer">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleAnswerImageUpload}
-                        />
-                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs ${isAnswerImageUploading ? "opacity-50" : "hover:bg-secondary"}`}>
-                          {isAnswerImageUploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-                          上传图片
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-                );
-              }
-
-              const isMultiple = currentQuestion.questionType === "multiple_choice";
-              const selectedLabels = isMultiple
-                ? userAnswer.split("").filter(Boolean)
-                : [userAnswer].filter(Boolean);
-
-              const toggleOption = (label: string) => {
-                if (isMultiple) {
-                  const newLabels = selectedLabels.includes(label)
-                    ? selectedLabels.filter((l) => l !== label)
-                    : [...selectedLabels, label].sort();
-                  setUserAnswer(newLabels.join(""));
-                } else {
-                  setUserAnswer(label);
-                }
-              };
-
-              return (
-                <div className="space-y-2">
-                  {opts.map((opt: any) => {
-                    const isSelected = selectedLabels.includes(opt.label);
-                    return (
-                      <button
-                        key={opt.label}
-                        onClick={() => toggleOption(opt.label)}
-                        className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                          isSelected
-                            ? "border-primary bg-primary/10"
-                            : "border-border hover:bg-secondary/30"
-                        }`}
-                      >
-                        <div className="flex items-start gap-2">
-                          <span className={`font-medium mr-2 ${isSelected ? "text-primary" : ""}`}>
-                            {isMultiple && (
-                              <span className={`inline-flex items-center justify-center w-5 h-5 border rounded ${isSelected ? "bg-primary border-primary text-white" : "border-border"}`}>
-                                {isSelected && "✓"}
-                              </span>
-                            )}
-                            {!isMultiple && `${opt.label}.`}
-                          </span>
-                          <MathContent content={opt.text} />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })()}
+                })()}
+              </div>
+            )}
+            {!currentQuestion.options && (
+              <Textarea
+                placeholder="请输入你的答案"
+                value={userAnswer}
+                onChange={(e) => setUserAnswer(e.target.value)}
+              />
+            )}
             <div className="flex gap-2">
-              <Button onClick={handleAnswer} disabled={submitAnswer.isPending || (!userAnswer.trim() && answerImageUrls.length === 0)}>
+              <Button onClick={handleAnswer} disabled={submitAnswer.isPending || !userAnswer}>
                 {submitAnswer.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                 提交答案
               </Button>
-              <Button variant="outline" onClick={() => { setCurrentQuestion(null); setUserAnswer(""); setAnswerImageUrls([]); setAnswerResult(null); }}>
+              <Button variant="outline" onClick={() => { setCurrentQuestion(null); setUserAnswer(""); setAnswerResult(null); }}>
                 取消
               </Button>
             </div>
@@ -1701,112 +1531,22 @@ export default function Questions() {
                   已选 {selectedQuestions.size} / {questionList.length}
                 </span>
                 {selectedQuestions.size > 0 && (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      onClick={() => setShowBatchEdit(true)}
-                    >
-                      批量修改标签
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        if (confirm(`确定要删除选中的 ${selectedQuestions.size} 道题目吗？`)) {
-                          deleteManyQuestions.mutate({ ids: Array.from(selectedQuestions) });
-                        }
-                      }}
-                      disabled={deleteManyQuestions.isPending}
-                    >
-                      {deleteManyQuestions.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <X className="h-3 w-3 mr-1" />}
-                      批量删除
-                    </Button>
-                  </>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      if (confirm(`确定要删除选中的 ${selectedQuestions.size} 道题目吗？`)) {
+                        deleteManyQuestions.mutate({ ids: Array.from(selectedQuestions) });
+                      }
+                    }}
+                    disabled={deleteManyQuestions.isPending}
+                  >
+                    {deleteManyQuestions.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <X className="h-3 w-3 mr-1" />}
+                    批量删除
+                  </Button>
                 )}
               </div>
-
-              {/* 批量修改标签面板 */}
-              {showBatchEdit && selectedQuestions.size > 0 && (
-                <Card className="border-primary/30">
-                  <CardContent className="pt-4 space-y-3">
-                    <p className="text-sm font-medium">批量修改 {selectedQuestions.size} 道题目的标签</p>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="text-sm text-muted-foreground">科目</label>
-                        <Select
-                          value={batchEditForm.subjectId ? String(batchEditForm.subjectId) : "none"}
-                          onValueChange={(v) => setBatchEditForm({ ...batchEditForm, subjectId: v === "none" ? undefined : parseInt(v) })}
-                        >
-                          <SelectTrigger><SelectValue placeholder="不修改" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">不修改</SelectItem>
-                            {subjects?.map((s) => (
-                              <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <label className="text-sm text-muted-foreground">知识点</label>
-                        <Select
-                          value={batchEditForm.nodeId ? String(batchEditForm.nodeId) : "none"}
-                          onValueChange={(v) => setBatchEditForm({ ...batchEditForm, nodeId: v === "none" ? undefined : parseInt(v) })}
-                        >
-                          <SelectTrigger><SelectValue placeholder="不修改" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">不修改</SelectItem>
-                            {knowledgeNodes?.map((n) => (
-                              <SelectItem key={n.id} value={String(n.id)}>{n.title}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <label className="text-sm text-muted-foreground">技能维度</label>
-                        <Select
-                          value={batchEditForm.skillId ? String(batchEditForm.skillId) : "none"}
-                          onValueChange={(v) => setBatchEditForm({ ...batchEditForm, skillId: v === "none" ? undefined : parseInt(v) })}
-                        >
-                          <SelectTrigger><SelectValue placeholder="不修改" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">不修改</SelectItem>
-                            {skills?.map((s) => (
-                              <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          const payload: any = { ids: Array.from(selectedQuestions) };
-                          if (batchEditForm.subjectId !== undefined) payload.subjectId = batchEditForm.subjectId;
-                          if (batchEditForm.nodeId !== undefined) payload.nodeId = batchEditForm.nodeId;
-                          if (batchEditForm.skillId !== undefined) payload.skillId = batchEditForm.skillId;
-                          if (Object.keys(payload).length <= 1) {
-                            toast.error("请至少选择一个要修改的标签");
-                            return;
-                          }
-                          updateManyQuestions.mutate(payload);
-                        }}
-                        disabled={updateManyQuestions.isPending}
-                      >
-                        {updateManyQuestions.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-                        确认修改
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => setShowBatchEdit(false)}>
-                        取消
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
               {questionList.map((q) => (
                 <div key={q.id} className="relative">
                   {renderQuestionCard(q, true, true)}
@@ -1898,7 +1638,7 @@ export default function Questions() {
                         </div>
                         <div className="text-sm text-muted-foreground mt-1">
                           <span className="text-green-400">正确答案：</span>
-                          <MathContent content={w.question.correctAnswer} />
+                          {w.question.correctAnswer}
                         </div>
                         {w.question.explanation && (
                           <p className="text-sm text-muted-foreground mt-2">
@@ -2192,7 +1932,7 @@ export default function Questions() {
                             )}
                             <div className="flex gap-2 mt-2">
                               <Badge variant="outline" className="text-xs">
-                                答案: <MathContent content={q.correctAnswer} />
+                                答案: {q.correctAnswer}
                               </Badge>
                               <Badge variant="outline" className="text-xs">
                                 {difficultyMap[q.difficulty]?.label}

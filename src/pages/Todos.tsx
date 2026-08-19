@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/providers/trpc";
 import { toast } from "sonner";
-import { MathContent } from "@/components/MathContent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -54,7 +53,6 @@ export default function Todos() {
   const [activeTodoId, setActiveTodoId] = useState<number | null>(null);
   const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
   const [testAnswers, setTestAnswers] = useState<Record<string, string>>({});
-  const [testAnswerImages, setTestAnswerImages] = useState<Record<string, string[]>>({});
   const [actualMinutes, setActualMinutes] = useState(30);
   const [testStep, setTestStep] = useState<"loading" | "testing" | "result" | "select-source">("select-source");
   const [testResult, setTestResult] = useState<any>(null);
@@ -70,14 +68,10 @@ export default function Todos() {
   const [activeReviewId, setActiveReviewId] = useState<number | null>(null);
   const [reviewTestQuestions, setReviewTestQuestions] = useState<TestQuestion[]>([]);
   const [reviewTestAnswers, setReviewTestAnswers] = useState<Record<string, string>>({});
-  const [reviewTestAnswerImages, setReviewTestAnswerImages] = useState<Record<string, string[]>>({});
   const [reviewTestStep, setReviewTestStep] = useState<"loading" | "testing" | "result" | "select-source">("select-source");
   const [reviewTestResult, setReviewTestResult] = useState<any>(null);
   const [reviewTestQuestionType, setReviewTestQuestionType] = useState<"single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed">("mixed");
   const [reviewTestQuestionCount, setReviewTestQuestionCount] = useState(5);
-  const [isReviewResuming, setIsReviewResuming] = useState(false);
-  const [historyDetailOpen, setHistoryDetailOpen] = useState(false);
-  const [historyDetail, setHistoryDetail] = useState<any>(null);
 
   // 复习详情查看状态
   const [reviewDetailOpen, setReviewDetailOpen] = useState(false);
@@ -110,48 +104,18 @@ export default function Todos() {
     }
   }, []);
 
-  // 从 localStorage 恢复缓存的复习测试
-  useEffect(() => {
-    const cached = localStorage.getItem("ai-review-cache");
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (parsed.questions && parsed.questions.length > 0 && Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
-          setIsReviewResuming(true);
-        }
-      } catch {
-        // 忽略解析错误
-      }
-    }
-  }, []);
-
   // 保存题目到 localStorage
   useEffect(() => {
     if (testQuestions.length > 0 && testStep === "testing") {
       const cache = {
         questions: testQuestions,
         answers: testAnswers,
-        answerImages: testAnswerImages,
         todoId: activeTodoId,
         timestamp: Date.now(),
       };
       localStorage.setItem("ai-exam-cache", JSON.stringify(cache));
     }
-  }, [testQuestions, testAnswers, testAnswerImages, testStep, activeTodoId]);
-
-  // 保存复习测试到 localStorage
-  useEffect(() => {
-    if (reviewTestQuestions.length > 0 && reviewTestStep === "testing") {
-      const cache = {
-        questions: reviewTestQuestions,
-        answers: reviewTestAnswers,
-        answerImages: reviewTestAnswerImages,
-        reviewId: activeReviewId,
-        timestamp: Date.now(),
-      };
-      localStorage.setItem("ai-review-cache", JSON.stringify(cache));
-    }
-  }, [reviewTestQuestions, reviewTestAnswers, reviewTestAnswerImages, reviewTestStep, activeReviewId]);
+  }, [testQuestions, testAnswers, testStep, activeTodoId]);
 
   // 清除缓存
   const clearCache = () => {
@@ -159,16 +123,10 @@ export default function Todos() {
     setIsResuming(false);
   };
 
-  const clearReviewCache = () => {
-    localStorage.removeItem("ai-review-cache");
-    setIsReviewResuming(false);
-  };
-
   const generateTest = trpc.todo.generateTest.useMutation({
     onSuccess: (data) => {
       setTestQuestions(data.questions);
       setTestAnswers({});
-      setTestAnswerImages({});
       setTestStep("testing");
       toast.success(data.source === "database" ? `从题库匹配 ${data.questions.length} 道题目` : `AI生成 ${data.questions.length} 道题目`);
     },
@@ -209,7 +167,6 @@ export default function Todos() {
     onSuccess: (data) => {
       setReviewTestQuestions(data.questions);
       setReviewTestAnswers({});
-      setReviewTestAnswerImages({});
       setReviewTestStep("testing");
       toast.success(data.source === "database" ? `从题库匹配 ${data.questions.length} 道题目` : `AI生成 ${data.questions.length} 道题目`);
     },
@@ -313,29 +270,10 @@ export default function Todos() {
         const parsed = JSON.parse(cached);
         setTestQuestions(parsed.questions);
         setTestAnswers(parsed.answers || {});
-        setTestAnswerImages(parsed.answerImages || {});
         setActiveTodoId(parsed.todoId);
         setTestStep("testing");
         setTestOpen(true);
         setIsResuming(false);
-      } catch {
-        toast.error("恢复失败");
-      }
-    }
-  };
-
-  const handleResumeReviewTest = () => {
-    const cached = localStorage.getItem("ai-review-cache");
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        setReviewTestQuestions(parsed.questions);
-        setReviewTestAnswers(parsed.answers || {});
-        setReviewTestAnswerImages(parsed.answerImages || {});
-        setActiveReviewId(parsed.reviewId);
-        setReviewTestStep("testing");
-        setReviewTestOpen(true);
-        setIsReviewResuming(false);
       } catch {
         toast.error("恢复失败");
       }
@@ -380,56 +318,9 @@ export default function Todos() {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const [uploadingAnswerImageId, setUploadingAnswerImageId] = useState<string | null>(null);
-
-  const handleAnswerImageUpload = async (
-    questionId: string,
-    file: File,
-    setImages: React.Dispatch<React.SetStateAction<Record<string, string[]>>>
-  ) => {
-    setUploadingAnswerImageId(questionId);
-    const formData = new FormData();
-    formData.append("file", file);
-    try {
-      const res = await fetch("/upload", { method: "POST", body: formData });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(`上传失败: ${err.error || res.statusText}`);
-        return;
-      }
-      const data = await res.json();
-      if (data.url) {
-        setImages((prev) => ({
-          ...prev,
-          [questionId]: [...(prev[questionId] || []), data.url],
-        }));
-        toast.success("图片上传成功");
-      }
-    } catch (err: any) {
-      toast.error(`上传失败: ${err.message}`);
-    } finally {
-      setUploadingAnswerImageId(null);
-    }
-  };
-
-  const removeAnswerImage = (
-    questionId: string,
-    index: number,
-    setImages: React.Dispatch<React.SetStateAction<Record<string, string[]>>>
-  ) => {
-    setImages((prev) => {
-      const list = prev[questionId] || [];
-      return { ...prev, [questionId]: list.filter((_, i) => i !== index) };
-    });
-  };
-
   const handleSubmitTest = () => {
     if (!activeTodoId) return;
-    const unanswered = testQuestions.filter((q) => {
-      const hasText = !!testAnswers[q.id]?.trim();
-      const hasImages = (testAnswerImages[q.id] || []).length > 0;
-      return !hasText && !hasImages;
-    });
+    const unanswered = testQuestions.filter((q) => !testAnswers[q.id]);
     if (unanswered.length > 0) {
       if (!confirm(`还有 ${unanswered.length} 道题未作答，确定提交吗？`)) return;
     }
@@ -448,7 +339,6 @@ export default function Todos() {
       answers: testQuestions.map((q) => ({
         questionId: q.id,
         userAnswer: testAnswers[q.id] || "",
-        imageUrls: testAnswerImages[q.id] || undefined,
       })),
     });
   };
@@ -526,11 +416,6 @@ export default function Todos() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{todo.subject}</span>
                           {statusBadge(todo.status)}
-                          {todo.status === "pending" && todo.date !== new Date().toISOString().split("T")[0] && (
-                            <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/20">
-                              已延期
-                            </Badge>
-                          )}
                         </div>
                         <Badge variant="outline">{todo.estimatedMinutes}分钟</Badge>
                       </div>
@@ -700,23 +585,6 @@ export default function Todos() {
                       <Button
                         size="sm"
                         onClick={() => {
-                          const cached = localStorage.getItem("ai-review-cache");
-                          if (cached) {
-                            try {
-                              const parsed = JSON.parse(cached);
-                              if (parsed.reviewId === rev.id && Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
-                                setReviewTestQuestions(parsed.questions);
-                                setReviewTestAnswers(parsed.answers || {});
-                                setReviewTestAnswerImages(parsed.answerImages || {});
-                                setActiveReviewId(rev.id);
-                                setReviewTestStep("testing");
-                                setReviewTestOpen(true);
-                                return;
-                              }
-                            } catch {
-                              // ignore
-                            }
-                          }
                           setActiveReviewId(rev.id);
                           setReviewTestStep("select-source");
                           setReviewTestOpen(true);
@@ -748,17 +616,6 @@ export default function Todos() {
                       {statusBadge(h.status)}
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 px-1.5 text-muted-foreground hover:text-primary"
-                        onClick={() => {
-                          setHistoryDetail(h);
-                          setHistoryDetailOpen(true);
-                        }}
-                      >
-                        <FileText className="h-3 w-3" />
-                      </Button>
                       <span className="text-xs text-muted-foreground">{h.date}</span>
                       {h.status === "completed" && (
                         <Button
@@ -879,7 +736,7 @@ export default function Todos() {
                     <Input
                       type="number"
                       min={1}
-                      max={100}
+                      max={20}
                       value={testQuestionCount}
                       onChange={(e) => setTestQuestionCount(parseInt(e.target.value) || 5)}
                       className="flex-1"
@@ -965,40 +822,24 @@ export default function Todos() {
                   : [currentAnswer].filter(Boolean);
 
                 const toggleOption = (label: string) => {
-                  console.log("[Todos toggleOption] click", {
-                    label,
-                    questionId: q.id,
-                    questionType: q.questionType,
-                    isMultiple,
-                    currentAnswer,
-                    selectedLabels,
-                    allAnswers: testAnswers,
-                  });
                   if (isMultiple) {
+                    // 多选题：切换选中状态
                     const newLabels = selectedLabels.includes(label)
                       ? selectedLabels.filter((l) => l !== label)
                       : [...selectedLabels, label].sort();
-                    const newAnswer = newLabels.join("");
-                    console.log("[Todos toggleOption] multiple choice update", {
-                      label,
-                      newLabels,
-                      newAnswer,
-                    });
-                    setTestAnswers({ ...testAnswers, [q.id]: newAnswer });
+                    setTestAnswers({ ...testAnswers, [q.id]: newLabels.join("") });
                   } else {
-                    console.log("[Todos toggleOption] single choice update", {
-                      label,
-                    });
+                    // 单选题：直接替换
                     setTestAnswers({ ...testAnswers, [q.id]: label });
                   }
                 };
 
                 return (
                   <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
-                    <div className="text-sm font-medium mb-2">
+                    <p className="text-sm font-medium mb-2">
                       <span className="text-primary mr-1">{idx + 1}.</span>
-                      <MathContent content={q.content} />
-                    </div>
+                      {q.content}
+                    </p>
                     {isMultiple && (
                       <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
                         <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
@@ -1028,49 +869,18 @@ export default function Todos() {
                                   )}
                                   {!isMultiple && `${opt.label}.`}
                                 </span>
-                                <MathContent content={opt.text} />
+                                <span>{opt.text}</span>
                               </div>
                             </button>
                           );
                         })}
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        <Input
-                          placeholder="请输入你的答案"
-                          value={testAnswers[q.id] || ""}
-                          onChange={(e) => setTestAnswers({ ...testAnswers, [q.id]: e.target.value })}
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          {(testAnswerImages[q.id] || []).map((url, i) => (
-                            <div key={i} className="relative group">
-                              <img src={url} alt="" className="h-16 w-16 object-cover rounded border" />
-                              <button
-                                onClick={() => removeAnswerImage(q.id, i, setTestAnswerImages)}
-                                className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))}
-                          <label className="cursor-pointer">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) handleAnswerImageUpload(q.id, file, setTestAnswerImages);
-                                e.target.value = "";
-                              }}
-                            />
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs ${uploadingAnswerImageId === q.id ? "opacity-50" : "hover:bg-secondary"}`}>
-                              {uploadingAnswerImageId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-                              上传图片
-                            </span>
-                          </label>
-                        </div>
-                      </div>
+                      <Input
+                        placeholder="请输入你的答案"
+                        value={testAnswers[q.id] || ""}
+                        onChange={(e) => setTestAnswers({ ...testAnswers, [q.id]: e.target.value })}
+                      />
                     )}
                     <p className="text-[10px] text-muted-foreground mt-1.5">知识点：{q.knowledgePoint}</p>
                   </div>
@@ -1144,19 +954,12 @@ export default function Todos() {
                     <div key={q.id} className={`p-2 rounded text-sm ${isCorrect ? "bg-green-500/5" : "bg-red-500/5"}`}>
                       <div className="flex items-center gap-2">
                         {isCorrect ? <CheckCircle2 className="h-3.5 w-3.5 text-green-400" /> : <XCircle className="h-3.5 w-3.5 text-red-400" />}
-                        <div className="font-medium"><span>{idx + 1}.</span> <MathContent content={q.content} /></div>
+                        <span className="font-medium">{idx + 1}. {q.content}</span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        你的答案：{userAns || "未作答"} · 正确答案：<MathContent content={q.correctAnswer} />
+                        你的答案：{userAns || "未作答"} · 正确答案：{q.correctAnswer}
                       </p>
-                      {(testAnswerImages[q.id] || []).length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {testAnswerImages[q.id].map((url, i) => (
-                            <img key={i} src={url} alt="" className="h-12 w-12 object-cover rounded border" />
-                          ))}
-                        </div>
-                      )}
-                      <MathContent content={q.explanation} className="text-xs text-primary mt-0.5" />
+                      <p className="text-xs text-primary mt-0.5">{q.explanation}</p>
                     </div>
                   );
                 })}
@@ -1171,10 +974,7 @@ export default function Todos() {
       </Dialog>
 
       {/* 复习任务AI考官弹窗 */}
-      <Dialog open={reviewTestOpen} onOpenChange={(open) => {
-        if (!open) clearReviewCache();
-        setReviewTestOpen(open);
-      }}>
+      <Dialog open={reviewTestOpen} onOpenChange={setReviewTestOpen}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1210,7 +1010,7 @@ export default function Todos() {
                     <Input
                       type="number"
                       min={1}
-                      max={100}
+                      max={20}
                       value={reviewTestQuestionCount}
                       onChange={(e) => setReviewTestQuestionCount(parseInt(e.target.value) || 5)}
                       className="flex-1"
@@ -1260,40 +1060,22 @@ export default function Todos() {
                   : [currentAnswer].filter(Boolean);
 
                 const toggleOption = (label: string) => {
-                  console.log("[Todos reviewToggleOption] click", {
-                    label,
-                    questionId: q.id,
-                    questionType: q.questionType,
-                    isMultiple,
-                    currentAnswer,
-                    selectedLabels,
-                    allAnswers: reviewTestAnswers,
-                  });
                   if (isMultiple) {
                     const newLabels = selectedLabels.includes(label)
                       ? selectedLabels.filter((l) => l !== label)
                       : [...selectedLabels, label].sort();
-                    const newAnswer = newLabels.join("");
-                    console.log("[Todos reviewToggleOption] multiple choice update", {
-                      label,
-                      newLabels,
-                      newAnswer,
-                    });
-                    setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: newAnswer });
+                    setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: newLabels.join("") });
                   } else {
-                    console.log("[Todos reviewToggleOption] single choice update", {
-                      label,
-                    });
                     setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: label });
                   }
                 };
 
                 return (
                   <div key={q.id} className="p-3 rounded-lg bg-secondary/30 border border-border">
-                    <div className="text-sm font-medium mb-2">
+                    <p className="text-sm font-medium mb-2">
                       <span className="text-primary mr-1">{idx + 1}.</span>
-                      <MathContent content={q.content} />
-                    </div>
+                      {q.content}
+                    </p>
                     {isMultiple && (
                       <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
                         <span className="inline-flex items-center justify-center w-4 h-4 border border-amber-400 rounded text-[10px]">✓</span>
@@ -1323,50 +1105,19 @@ export default function Todos() {
                                   )}
                                   {opt.label}.
                                 </span>
-                                <MathContent content={opt.text} className="flex-1" />
+                                <span className="flex-1">{opt.text}</span>
                               </div>
                             </button>
                           );
                         })}
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        <textarea
-                          className="w-full p-2 rounded-lg border border-border bg-background text-sm min-h-[80px]"
-                          placeholder="请输入答案..."
-                          value={reviewTestAnswers[q.id] || ""}
-                          onChange={(e) => setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: e.target.value })}
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          {(reviewTestAnswerImages[q.id] || []).map((url, i) => (
-                            <div key={i} className="relative group">
-                              <img src={url} alt="" className="h-16 w-16 object-cover rounded border" />
-                              <button
-                                onClick={() => removeAnswerImage(q.id, i, setReviewTestAnswerImages)}
-                                className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))}
-                          <label className="cursor-pointer">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) handleAnswerImageUpload(q.id, file, setReviewTestAnswerImages);
-                                e.target.value = "";
-                              }}
-                            />
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-xs ${uploadingAnswerImageId === q.id ? "opacity-50" : "hover:bg-secondary"}`}>
-                              {uploadingAnswerImageId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-                              上传图片
-                            </span>
-                          </label>
-                        </div>
-                      </div>
+                      <textarea
+                        className="w-full p-2 rounded-lg border border-border bg-background text-sm min-h-[80px]"
+                        placeholder="请输入答案..."
+                        value={reviewTestAnswers[q.id] || ""}
+                        onChange={(e) => setReviewTestAnswers({ ...reviewTestAnswers, [q.id]: e.target.value })}
+                      />
                     )}
                   </div>
                 );
@@ -1381,19 +1132,14 @@ export default function Todos() {
                       submitReviewTest.mutate({
                         reviewId: activeReviewId,
                         questions: reviewTestQuestions,
-                        answers: reviewTestQuestions.map((q) => ({
-                          questionId: q.id,
-                          userAnswer: reviewTestAnswers[q.id] || "",
-                          imageUrls: reviewTestAnswerImages[q.id] || undefined,
+                        answers: Object.entries(reviewTestAnswers).map(([questionId, userAnswer]) => ({
+                          questionId,
+                          userAnswer,
                         })),
                       });
                     }
                   }}
-                  disabled={reviewTestQuestions.some((q) => {
-                    const hasText = !!reviewTestAnswers[q.id]?.trim();
-                    const hasImages = (reviewTestAnswerImages[q.id] || []).length > 0;
-                    return !hasText && !hasImages;
-                  })}
+                  disabled={reviewTestQuestions.some(q => !reviewTestAnswers[q.id])}
                 >
                   提交答案
                 </Button>
@@ -1523,19 +1269,12 @@ export default function Todos() {
                         <XCircle className="h-4 w-4 text-red-400 mt-0.5" />
                       )}
                       <div className="flex-1">
-                        <div className="font-medium"><span>{idx + 1}.</span> <MathContent content={q.content} /></div>
+                        <p className="font-medium">{idx + 1}. {q.content}</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          你的答案：{q.userAnswer || "未作答"} · 正确答案：<MathContent content={q.correctAnswer} />
+                          你的答案：{q.userAnswer || "未作答"} · 正确答案：{q.correctAnswer}
                         </p>
-                        {q.imageUrls && q.imageUrls.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {q.imageUrls.map((url: string, i: number) => (
-                              <img key={i} src={url} alt="" className="h-12 w-12 object-cover rounded border" />
-                            ))}
-                          </div>
-                        )}
                         {q.explanation && (
-                          <MathContent content={q.explanation} className="text-xs text-primary mt-1" />
+                          <p className="text-xs text-primary mt-1">{q.explanation}</p>
                         )}
                       </div>
                     </div>
@@ -1576,70 +1315,6 @@ export default function Todos() {
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <p>暂无详细测试记录</p>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* 历史记录详情 */}
-      <Dialog open={historyDetailOpen} onOpenChange={setHistoryDetailOpen}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle>任务详情</DialogTitle>
-          </DialogHeader>
-          {historyDetail && (
-            <div className="space-y-4 py-2">
-              <div className="flex items-center gap-2">
-                {statusIcon(historyDetail.status)}
-                <span className="font-medium">{historyDetail.subject}</span>
-                {statusBadge(historyDetail.status)}
-              </div>
-              <div>
-                <label className="text-sm font-medium">日期</label>
-                <p className="text-sm">{historyDetail.date}</p>
-              </div>
-              {historyDetail.focus && (
-                <div>
-                  <label className="text-sm font-medium">学习目标</label>
-                  <p className="text-sm text-muted-foreground">{historyDetail.focus}</p>
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">预计时长</label>
-                  <p className="text-sm">{historyDetail.estimatedMinutes} 分钟</p>
-                </div>
-                {historyDetail.actualMinutes && (
-                  <div>
-                    <label className="text-sm font-medium">实际时长</label>
-                    <p className="text-sm">{historyDetail.actualMinutes} 分钟</p>
-                  </div>
-                )}
-              </div>
-              {historyDetail.knowledgeNodes && (
-                <div>
-                  <label className="text-sm font-medium">知识点</label>
-                  <p className="text-sm text-muted-foreground">{(() => { try { return JSON.parse(historyDetail.knowledgeNodes).join("、"); } catch { return historyDetail.knowledgeNodes; } })()}</p>
-                </div>
-              )}
-              {historyDetail.aiMastery !== null && historyDetail.aiMastery > 0 && (
-                <div>
-                  <label className="text-sm font-medium">掌握度</label>
-                  <p className="text-sm">{historyDetail.aiMastery}%</p>
-                </div>
-              )}
-              {historyDetail.aiEvaluation && (
-                <div>
-                  <label className="text-sm font-medium">AI 评估</label>
-                  <p className="text-sm text-primary/80 bg-primary/5 p-2 rounded">{historyDetail.aiEvaluation}</p>
-                </div>
-              )}
-              {historyDetail.snapshot && (
-                <div>
-                  <label className="text-sm font-medium">测试快照</label>
-                  <pre className="text-xs text-muted-foreground bg-secondary/30 p-2 rounded overflow-auto max-h-40">{historyDetail.snapshot}</pre>
-                </div>
-              )}
             </div>
           )}
         </DialogContent>

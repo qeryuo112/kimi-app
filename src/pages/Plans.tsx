@@ -24,6 +24,8 @@ import {
   Lightbulb,
   CheckSquare,
   Library,
+  FileUp,
+  X,
 } from "lucide-react";
 
 export default function Plans() {
@@ -38,7 +40,6 @@ export default function Plans() {
   const [planRequirements, setPlanRequirements] = useState<Record<number, string>>({});
   const [showSelectSubjects, setShowSelectSubjects] = useState(false);
   const [selectedExistingIds, setSelectedExistingIds] = useState<Set<number>>(new Set());
-  const [genDate, setGenDate] = useState(() => new Date().toISOString().split("T")[0]);
 
   // 创建计划
   const createPlan = trpc.plan.create.useMutation({
@@ -81,12 +82,8 @@ export default function Plans() {
       }
       utils.plan.list.invalidate();
       utils.subject.list.invalidate();
-      // 延迟关闭弹窗，避免和 invalidate 导致的重新渲染冲突
-      // （浏览器翻译扩展可能已注入 DOM 节点）
-      setTimeout(() => {
-        setShowSelectSubjects(false);
-        setSelectedExistingIds(new Set());
-      }, 100);
+      setShowSelectSubjects(false);
+      setSelectedExistingIds(new Set());
       const added = data.results.filter((r) => r.success).length;
       if (added > 0) {
         toast.success(`成功添加 ${added} 个科目到计划`);
@@ -256,9 +253,92 @@ export default function Plans() {
     reviewRounds: 3,
   });
 
+  // 上传计划文件相关状态
+  const [showUploadPlanDialog, setShowUploadPlanDialog] = useState(false);
+  const [uploadPlanFiles, setUploadPlanFiles] = useState<Array<{ url: string; name: string }>>([]);
+  const [uploadPlanSubjectIds, setUploadPlanSubjectIds] = useState<Set<number>>(new Set());
+  const [isUploadingPlanFile, setIsUploadingPlanFile] = useState(false);
+  const [uploadPlanRequirements, setUploadPlanRequirements] = useState("");
+
+  // 从上传的计划文件生成完整复习计划
+  const aiGenerateFromPlanFile = trpc.plan.aiGenerateFromPlanFile.useMutation({
+    onSuccess: (data) => {
+      if (expandedPlan !== null) {
+        utils.plan.getById.invalidate({ id: expandedPlan });
+      }
+      const unmatchedCount = data.unmatchedContent?.length || 0;
+      toast.success(`计划文件解析成功！共 ${data.weeklyPlan?.length || 0} 周${unmatchedCount > 0 ? `，有 ${unmatchedCount} 处内容未能匹配到知识节点` : ""}`);
+      setShowUploadPlanDialog(false);
+      setUploadPlanFiles([]);
+      setUploadPlanSubjectIds(new Set());
+      setUploadPlanRequirements("");
+    },
+    onError: (err) => {
+      toast.error(`计划文件解析失败: ${err.message}`);
+    },
+  });
+
   const handleCreate = () => {
     if (!form.title.trim()) return;
     createPlan.mutate(form);
+  };
+
+  // 上传计划文件到文件服务器
+  const handleUploadPlanFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingPlanFile(true);
+    const newFiles: Array<{ url: string; name: string }> = [];
+
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch("/upload", {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          toast.error(`${file.name} 上传失败: ${err.error || res.statusText}`);
+          continue;
+        }
+        const data = await res.json();
+        if (data.url) {
+          newFiles.push({ url: data.url, name: file.name });
+        }
+      } catch (err: any) {
+        toast.error(`${file.name} 上传失败: ${err.message}`);
+      }
+    }
+
+    setUploadPlanFiles((prev) => [...prev, ...newFiles]);
+    setIsUploadingPlanFile(false);
+    e.target.value = "";
+  };
+
+  // 提交计划文件解析请求
+  const handleGenerateFromPlanFile = (planId: number) => {
+    if (uploadPlanFiles.length === 0) {
+      toast.error("请先上传计划文件");
+      return;
+    }
+    if (uploadPlanSubjectIds.size === 0) {
+      toast.error("请至少选择一个已有科目");
+      return;
+    }
+
+    aiGenerateFromPlanFile.mutate({
+      planId,
+      subjectIds: Array.from(uploadPlanSubjectIds),
+      fileUrl: uploadPlanFiles[0].url,
+      requirements: uploadPlanRequirements || undefined,
+    });
+  };
+
+  const removeUploadPlanFile = (index: number) => {
+    setUploadPlanFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSearch = () => {
@@ -446,7 +526,11 @@ export default function Plans() {
                       variant="ghost"
                       size="sm"
                       className="text-destructive hover:text-destructive"
-                      onClick={() => deletePlan.mutate({ id: plan.id })}
+                      onClick={() => {
+                        if (confirm("确定要删除此学习计划吗？\n\n将删除：每日任务、复习调度、周测回顾、计划-科目关联\n保留：科目、知识树、题库（可在新计划中复用）")) {
+                          deletePlan.mutate({ id: plan.id });
+                        }
+                      }}
                       disabled={deletePlan.isPending}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -587,7 +671,7 @@ export default function Plans() {
 
                       {/* 从科目管理选择科目弹窗 */}
                       {selectedPlanId === plan.id && showSelectSubjects && (
-                        <div className="space-y-3" translate="no">
+                        <div className="space-y-3">
                           <div className="flex items-center justify-between">
                             <p className="text-sm font-medium">选择科目管理中的科目：</p>
                             <Button
@@ -738,6 +822,34 @@ export default function Plans() {
                           告诉AI你的实际情况和偏好，生成的计划会更贴合你的需求
                         </p>
                       </div>
+
+                      {/* 上传计划文件生成 */}
+                      <div className="p-3 rounded-lg bg-secondary/20 border border-border space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <FileUp className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-medium">已有复习计划文件？</span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setExpandedPlan(plan.id);
+                              setShowUploadPlanDialog(true);
+                              // 默认选中当前计划已关联的科目
+                              if (planDetail?.subjects) {
+                                setUploadPlanSubjectIds(new Set(planDetail.subjects.map((s: any) => s.id)));
+                              }
+                            }}
+                          >
+                            上传计划文件
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          上传PDF、Word、图片等格式的复习计划，AI将结合已有科目知识树生成标准计划
+                        </p>
+                      </div>
+
                       {/* 计划生成按钮组 */}
                       {(() => {
                         const schedule = plan.aiPlan ? JSON.parse(plan.aiPlan) : null;
@@ -816,25 +928,17 @@ export default function Plans() {
                               </div>
                             )}
 
-                            {/* 生成某日任务 + 删除 */}
+                            {/* 生成今日任务 + 删除 */}
                             <div className="flex gap-2 w-full">
-                              <div className="flex-1 flex gap-2">
-                                <Input
-                                  type="date"
-                                  value={genDate}
-                                  onChange={(e) => setGenDate(e.target.value)}
-                                  className="w-32 text-xs h-9"
-                                />
-                                <Button
-                                  variant="outline"
-                                  onClick={() => generateTodos.mutate({ planId: plan.id, date: genDate })}
-                                  disabled={generateTodos.isPending || !plan.aiPlan}
-                                  className="flex-1"
-                                >
-                                  <CheckSquare className="h-4 w-4 mr-1" />
-                                  {generateTodos.isPending ? "生成中..." : "生成任务"}
-                                </Button>
-                              </div>
+                              <Button
+                                variant="outline"
+                                onClick={() => generateTodos.mutate({ planId: plan.id })}
+                                disabled={generateTodos.isPending || !plan.aiPlan}
+                                className="flex-1"
+                              >
+                                <CheckSquare className="h-4 w-4 mr-1" />
+                                {generateTodos.isPending ? "生成中..." : "生成今日任务"}
+                              </Button>
                               {plan.aiPlan && (
                                 <Button
                                   variant="destructive"
@@ -1369,6 +1473,110 @@ export default function Plans() {
             </div>
           )}
         </DialogContent>
+    </Dialog>
+
+    {/* 上传计划文件对话框 */}
+    <Dialog open={showUploadPlanDialog} onOpenChange={setShowUploadPlanDialog}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>上传计划文件</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-2">
+          <p className="text-sm text-muted-foreground">
+            上传你的复习计划文件（PDF、Word、图片等），AI将结合已选科目的本地知识树生成标准计划。
+          </p>
+
+          {/* 科目选择 */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">选择文件对应的已有科目</label>
+            {allSubjects && allSubjects.length > 0 ? (
+              <div className="space-y-2 max-h-[200px] overflow-y-auto p-2 rounded-lg bg-secondary/20 border border-border">
+                {allSubjects.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={uploadPlanSubjectIds.has(s.id)}
+                      onChange={() => {
+                        const next = new Set(uploadPlanSubjectIds);
+                        if (next.has(s.id)) next.delete(s.id);
+                        else next.add(s.id);
+                        setUploadPlanSubjectIds(next);
+                      }}
+                      className="rounded border-border"
+                    />
+                    <span>{s.title}</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">暂无可用科目，请先去「科目管理」创建科目</p>
+            )}
+          </div>
+
+          {/* 文件上传 */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">计划文件</label>
+            <Input
+              type="file"
+              accept=".pdf,.doc,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"
+              onChange={handleUploadPlanFile}
+              disabled={isUploadingPlanFile || aiGenerateFromPlanFile.isPending}
+            />
+            {uploadPlanFiles.length > 0 && (
+              <div className="space-y-1">
+                {uploadPlanFiles.map((file, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-2 rounded bg-secondary/30 text-sm">
+                    <span className="truncate">{file.name}</span>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeUploadPlanFile(idx)}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {isUploadingPlanFile && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                上传中...
+              </div>
+            )}
+          </div>
+
+          {/* 额外需求 */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">额外需求（可选）</label>
+            <Textarea
+              placeholder="例如：重点强化药理学，药剂学可适当减少时间..."
+              value={uploadPlanRequirements}
+              onChange={(e) => setUploadPlanRequirements(e.target.value)}
+              className="min-h-[60px] text-sm"
+            />
+          </div>
+
+          {/* 提交按钮 */}
+          <Button
+            onClick={() => {
+              if (expandedPlan !== null) {
+                handleGenerateFromPlanFile(expandedPlan);
+              }
+            }}
+            disabled={
+              aiGenerateFromPlanFile.isPending ||
+              isUploadingPlanFile ||
+              uploadPlanFiles.length === 0 ||
+              uploadPlanSubjectIds.size === 0
+            }
+            className="w-full"
+          >
+            {aiGenerateFromPlanFile.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-1" />
+            ) : (
+              <Sparkles className="h-4 w-4 mr-1" />
+            )}
+            {aiGenerateFromPlanFile.isPending ? "解析中..." : "AI解析计划文件"}
+          </Button>
+        </div>
+      </DialogContent>
     </Dialog>
     </>
   );

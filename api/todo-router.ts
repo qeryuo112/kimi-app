@@ -14,9 +14,8 @@ import {
   questions,
   wrongAnswers,
 } from "@db/schema";
-import { eq, and, or, lte, lt, desc, inArray } from "drizzle-orm";
+import { eq, and, lte, desc, inArray } from "drizzle-orm";
 import { generateTodoTestQuestions, generateTodoTestFromFiles, evaluateTodoTestAnswers } from "./lib/ai";
-import { formatLocalDate } from "./lib/date-utils";
 
 // 根据掌握度计算下一次复习间隔（间隔重复算法）
 function calculateNextInterval(currentInterval: number, mastery: number): number {
@@ -26,43 +25,15 @@ function calculateNextInterval(currentInterval: number, mastery: number): number
   return 1; // 掌握差，隔天复习
 }
 
-// 推断题目实际题型（AI混合模式下可能返回"mixed"，需根据内容推断）
-function inferQuestionType(q: {
-  questionType?: string;
-  options?: Array<{ label: string; text: string }>;
-  correctAnswer?: string;
-}): "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" {
-  // 如果已经有明确的非mixed题型，直接返回
-  if (q.questionType && q.questionType !== "mixed") {
-    return q.questionType as "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay";
-  }
-  // 有选项 = 选择题
-  if (q.options && Array.isArray(q.options) && q.options.length > 0) {
-    const ans = (q.correctAnswer || "").trim();
-    // 正确答案长度>1 = 多选题（如 "AB"）
-    if (ans.length > 1) {
-      return "multiple_choice";
-    }
-    return "single_choice";
-  }
-  // 无选项，按原始类型或默认填空题
-  if (q.questionType === "short_answer") return "short_answer";
-  if (q.questionType === "essay") return "essay";
-  return "fill_blank";
-}
-
 export const todoRouter = createRouter({
-  // 为指定计划生成某日任务（从dailyPlan中解析）
-  // date 不传时默认生成今日任务
+  // 为指定计划生成今日任务（从dailyPlan中解析）
   generateTodayTodos: authedQuery
-    .input(z.object({ planId: z.number(), date: z.string().optional() }))
+    .input(z.object({ planId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const targetDate = input.date || formatLocalDate();
+      const today = new Date().toISOString().split("T")[0];
 
-      console.log("[DEBUG generateTodayTodos] START", { targetDate, planId: input.planId, userId: ctx.user.id });
-
-      // 检查该日期是否已生成过
+      // 检查今天是否已生成过
       const existing = await db
         .select()
         .from(dailyTodos)
@@ -70,14 +41,12 @@ export const todoRouter = createRouter({
           and(
             eq(dailyTodos.userId, ctx.user.id),
             eq(dailyTodos.planId, input.planId),
-            eq(dailyTodos.date, targetDate)
+            eq(dailyTodos.date, today)
           )
         );
 
-      console.log("[DEBUG generateTodayTodos] existing check", { targetDate, existingCount: existing.length });
-
       if (existing.length > 0) {
-        return { generated: false, message: `${targetDate} 任务已生成`, count: existing.length };
+        return { generated: false, message: "今日任务已生成", count: existing.length };
       }
 
       // 获取计划
@@ -87,69 +56,57 @@ export const todoRouter = createRouter({
         .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
 
       if (!plan || !plan.aiPlan) {
-        console.log("[DEBUG generateTodayTodos] no plan or aiPlan", { hasPlan: !!plan, hasAiPlan: !!plan?.aiPlan });
         throw new Error("计划不存在或未生成复习计划");
       }
 
-      console.log("[DEBUG generateTodayTodos] plan fetched", { planId: plan.id, startDateRaw: plan.startDate });
-
       let dailyPlan: any[] = [];
-      let parsedAiPlan: any = {};
       try {
-        parsedAiPlan = JSON.parse(plan.aiPlan);
-        dailyPlan = parsedAiPlan.dailyPlan || [];
-      } catch (e) {
-        console.log("[DEBUG generateTodayTodos] aiPlan parse error", { aiPlanPreview: plan.aiPlan?.slice(0, 200) });
+        const parsed = JSON.parse(plan.aiPlan);
+        dailyPlan = parsed.dailyPlan || [];
+      } catch {
         throw new Error("计划数据格式错误");
       }
-
-      console.log("[DEBUG generateTodayTodos] dailyPlan info", { dailyPlanLength: dailyPlan.length, allDays: dailyPlan.map((d: any) => d.day), generatedWeeks: parsedAiPlan.generatedWeeks });
 
       if (dailyPlan.length === 0) {
         throw new Error("计划中没有日计划数据");
       }
 
-      // 计算目标日期是第几天（从开始日期算起）
-      const startDate = formatLocalDate(plan.startDate);
+      // 计算今天是第几天（从开始日期算起）
+      const startDate = plan.startDate
+        ? new Date(plan.startDate).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0];
 
       const start = new Date(startDate);
-      const target = new Date(targetDate);
-      const dayDiff = Math.floor((target.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-      const targetDayIndex = dayDiff + 1;
+      const todayDate = new Date(today);
+      const dayDiff = Math.floor((todayDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      const todayDayIndex = dayDiff + 1;
 
-      console.log("[DEBUG generateTodayTodos] day calculation", { startDate, targetDate, startTs: start.getTime(), targetTs: target.getTime(), dayDiff, targetDayIndex });
+      // 找到今天的计划项
+      const todayItems = dailyPlan.filter((d: any) => d.day === todayDayIndex);
 
-      // 找到目标日期的计划项
-      const targetItems = dailyPlan.filter((d: any) => d.day === targetDayIndex);
-
-      console.log("[DEBUG generateTodayTodos] targetItems", { targetDayIndex, targetItemsCount: targetItems.length, targetItemsSubjects: targetItems.map((d: any) => d.subject) });
-
-      // 同时查找复习调度中目标日期需要复习的内容
-      const targetReviews = await db
+      // 同时查找复习调度中今天需要复习的内容
+      const todayReviews = await db
         .select()
         .from(reviewSchedules)
         .where(
           and(
             eq(reviewSchedules.userId, ctx.user.id),
             eq(reviewSchedules.planId, input.planId),
-            eq(reviewSchedules.nextReviewDate, targetDate),
+            eq(reviewSchedules.nextReviewDate, today),
             eq(reviewSchedules.status, "active")
           )
         );
 
-      console.log("[DEBUG generateTodayTodos] targetReviews", { targetDate, targetReviewsCount: targetReviews.length });
-
       const created = [];
 
-      // 插入目标日期新学任务
-      for (const item of targetItems) {
-        console.log("[DEBUG generateTodayTodos] inserting new task", { subject: item.subject, day: item.day });
+      // 插入今日新学任务
+      for (const item of todayItems) {
         const [{ id }] = await db
           .insert(dailyTodos)
           .values({
             userId: ctx.user.id,
             planId: input.planId,
-            date: targetDate,
+            date: today,
             dayIndex: item.day,
             subject: item.subject || "",
             knowledgeNodes: JSON.stringify(item.knowledgeNodes || []),
@@ -160,17 +117,49 @@ export const todoRouter = createRouter({
           .$returningId();
         created.push(id);
 
+        // 为新知识点创建复习调度
+        const nodes = item.knowledgeNodes || [];
+        for (const node of nodes) {
+          const existingReview = await db
+            .select()
+            .from(reviewSchedules)
+            .where(
+              and(
+                eq(reviewSchedules.userId, ctx.user.id),
+                eq(reviewSchedules.planId, input.planId),
+                eq(reviewSchedules.nodeTitle, node)
+              )
+            );
+
+          if (existingReview.length === 0) {
+            // 首次学习，安排第一次复习（1天后）
+            const nextDate = new Date(today);
+            nextDate.setDate(nextDate.getDate() + 1);
+            await db.insert(reviewSchedules).values({
+              userId: ctx.user.id,
+              planId: input.planId,
+              nodeTitle: node,
+              subjectTitle: item.subject || "",
+              originalStudyDate: today,
+              reviewDates: JSON.stringify([]),
+              nextReviewDate: nextDate.toISOString().split("T")[0],
+              intervalDays: 1,
+              reviewCount: 0,
+              mastery: 0,
+              status: "active",
+            });
+          }
+        }
       }
 
-      // 插入目标日期复习任务（作为todo）
-      for (const rev of targetReviews) {
-        console.log("[DEBUG generateTodayTodos] inserting review task", { subject: rev.subjectTitle });
+      // 插入今日复习任务（作为todo）
+      for (const rev of todayReviews) {
         const [{ id }] = await db
           .insert(dailyTodos)
           .values({
             userId: ctx.user.id,
             planId: input.planId,
-            date: targetDate,
+            date: today,
             dayIndex: 0, // 复习任务标记为0
             subject: rev.subjectTitle,
             knowledgeNodes: JSON.stringify([rev.nodeTitle]),
@@ -182,34 +171,19 @@ export const todoRouter = createRouter({
         created.push(id);
       }
 
-      console.log("[DEBUG generateTodayTodos] END", { targetDate, createdCount: created.length, createdIds: created });
-
-      return { generated: true, count: created.length, date: targetDate };
+      return { generated: true, count: created.length };
     }),
 
   // 获取今日任务（所有计划汇总）
-  // 包含今天的所有任务 + 历史日期未完成的 pending 任务（自动顺延）
   getToday: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
-    const today = formatLocalDate();
-
-    console.log("[DEBUG getToday] query", { today, userId: ctx.user.id });
+    const today = new Date().toISOString().split("T")[0];
 
     const todos = await db
       .select()
       .from(dailyTodos)
-      .where(
-        and(
-          eq(dailyTodos.userId, ctx.user.id),
-          or(
-            eq(dailyTodos.date, today),
-            and(lt(dailyTodos.date, today), eq(dailyTodos.status, "pending"))
-          )
-        )
-      )
+      .where(and(eq(dailyTodos.userId, ctx.user.id), eq(dailyTodos.date, today)))
       .orderBy(dailyTodos.status);
-
-    console.log("[DEBUG getToday] result", { today, todosCount: todos.length, dates: todos.map(t => t.date) });
 
     const completedCount = todos.filter((t) => t.status === "completed").length;
     const totalCount = todos.length;
@@ -243,7 +217,7 @@ export const todoRouter = createRouter({
     )
     .query(async ({ ctx, input }) => {
       const db = getDb();
-      const targetDate = input?.date || formatLocalDate();
+      const targetDate = input?.date || new Date().toISOString().split("T")[0];
 
       const conditions = [
         eq(reviewSchedules.userId, ctx.user.id),
@@ -268,7 +242,7 @@ export const todoRouter = createRouter({
       z.object({
         id: z.number(),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
-        count: z.number().min(1).max(100).default(5),
+        count: z.number().min(1).max(20).default(5),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -306,8 +280,6 @@ export const todoRouter = createRouter({
             ))
         : [];
       const nodeMap = new Map(nodeDetails.map((n) => [n.title, n]));
-      const nodeIds = nodeDetails.map((n) => n.id);
-      const nodeIdMap = new Map(nodeDetails.map((n) => [n.id, n.title]));
 
       const [setting] = await db
         .select()
@@ -345,7 +317,7 @@ export const todoRouter = createRouter({
         }
       }
 
-      // 智能选题：先从题库中找相关题目（数据库层预过滤 + 内存精确评分）
+      // 智能选题：先从题库中找相关题目
       const allQuestions = await db
         .select()
         .from(questions)
@@ -356,8 +328,6 @@ export const todoRouter = createRouter({
 
       // 根据学科和知识点匹配题目
       const matchedQuestions = allQuestions.filter((q) => {
-        // 精确匹配 nodeId
-        if (q.nodeId && nodeIds.includes(q.nodeId)) return true;
         // 匹配 subjectId
         if (subjectId && q.subjectId === subjectId) return true;
         // 匹配 detectedSubject（学科匹配）
@@ -381,17 +351,13 @@ export const todoRouter = createRouter({
         return false;
       });
 
-      // 给题目打分并排序（统一评分权重）
+      // 给题目打分并排序（错题权重更高）
       const scoredQuestions = matchedQuestions.map((q) => {
         let score = 0;
-
-        // nodeId 精确匹配 +100 分（最高权重）
-        if (q.nodeId && nodeIds.includes(q.nodeId)) score += 100;
-
-        // subjectId 精确匹配 +50 分
+        // 基础匹配分数（可累加）
         if (subjectId && q.subjectId === subjectId) score += 50;
 
-        // 知识点文本匹配 +40 分
+        // 知识点匹配 +40 分
         if (q.detectedKnowledgePoint) {
           const normalizedQKP = q.detectedKnowledgePoint.toLowerCase();
           const kpMatch = nodeTitles.some((title: string) =>
@@ -401,7 +367,7 @@ export const todoRouter = createRouter({
           if (kpMatch) score += 40;
         }
 
-        // 学科文本匹配 +10 分
+        // 学科匹配 +10 分
         if (q.detectedSubject && todo.subject) {
           const normalizedQSubject = q.detectedSubject.trim().toLowerCase();
           if (normalizedQSubject === normalizedTodoSubject ||
@@ -440,12 +406,8 @@ export const todoRouter = createRouter({
             options: q.options ? JSON.parse(q.options) : undefined,
             correctAnswer: q.correctAnswer,
             explanation: q.explanation || "",
-            knowledgePoint: q.detectedKnowledgePoint || (q.nodeId && nodeIdMap.get(q.nodeId)) || "综合",
-            questionType: inferQuestionType({
-              questionType: q.questionType || undefined,
-              options: q.options ? JSON.parse(q.options) : undefined,
-              correctAnswer: q.correctAnswer,
-            }),
+            knowledgePoint: q.detectedKnowledgePoint || "综合",
+            questionType: q.questionType,
           })),
           source: "database",
         };
@@ -465,17 +427,12 @@ export const todoRouter = createRouter({
       // 将AI生成的题目保存到题库
       const savedQuestionIds: number[] = [];
       for (const q of result.questions) {
-        console.log("[todo.generateTest] 准备插入题目", {
-          content: q.content?.slice(0, 50),
-          hasBackslashChem: q.content?.includes("\\chem"),
-          hasBelChem: q.content?.includes("\x07chem"),
-        });
         const [{ id }] = await db
           .insert(questions)
           .values({
             userId: ctx.user.id,
             subjectId: todo.subjectId,
-            questionType: inferQuestionType(q),
+            questionType: q.questionType || input.questionType,
             content: q.content,
             options: q.options ? JSON.stringify(q.options) : null,
             correctAnswer: q.correctAnswer,
@@ -489,14 +446,7 @@ export const todoRouter = createRouter({
         savedQuestionIds.push(id);
       }
 
-      return {
-        questions: result.questions.map((q) => ({
-          ...q,
-          questionType: inferQuestionType(q),
-        })),
-        source: "ai",
-        savedQuestionIds,
-      };
+      return { ...result, source: "ai", savedQuestionIds };
     }),
 
   // 从文件生成测试题
@@ -506,7 +456,7 @@ export const todoRouter = createRouter({
         id: z.number(),
         urls: z.array(z.string().url()).min(1).max(5),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
-        count: z.number().min(1).max(100).default(5),
+        count: z.number().min(1).max(20).default(5),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -546,11 +496,6 @@ export const todoRouter = createRouter({
       // 将AI生成的题目保存到题库
       const savedQuestionIds: number[] = [];
       for (const q of result.questions) {
-        console.log("[todo.generateTestFromFiles] 准备插入题目", {
-          content: q.content?.slice(0, 50),
-          hasBackslashChem: q.content?.includes("\\chem"),
-          hasBelChem: q.content?.includes("\x07chem"),
-        });
         const [{ id }] = await db
           .insert(questions)
           .values({
@@ -593,14 +538,13 @@ export const todoRouter = createRouter({
           z.object({
             questionId: z.string(),
             userAnswer: z.string(),
-            imageUrls: z.array(z.string()).optional(),
           })
         ),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const today = formatLocalDate();
+      const today = new Date().toISOString().split("T")[0];
 
       const [todo] = await db
         .select()
@@ -913,7 +857,7 @@ export const todoRouter = createRouter({
           .where(eq(skillDimensions.id, skill.id));
       }
 
-      // 7. 更新/创建复习调度（仅在任务完成后创建，未完成的任务不进入复习调度）
+      // 7. 更新复习调度
       for (const node of nodes) {
         const [rev] = await db
           .select()
@@ -927,7 +871,6 @@ export const todoRouter = createRouter({
           );
 
         if (rev) {
-          // 已有复习调度，更新
           const newInterval = calculateNextInterval(rev.intervalDays, mastery);
           const nextDate = new Date();
           nextDate.setDate(nextDate.getDate() + newInterval);
@@ -944,34 +887,17 @@ export const todoRouter = createRouter({
             .update(reviewSchedules)
             .set({
               reviewCount: rev.reviewCount + 1,
-              nextReviewDate: formatLocalDate(nextDate),
+              nextReviewDate: nextDate.toISOString().split("T")[0],
               intervalDays: newInterval,
               mastery: Math.max(rev.mastery, mastery),
-              reviewDates: JSON.stringify([...existingDates, formatLocalDate()]),
+              reviewDates: JSON.stringify([...existingDates, new Date().toISOString().split("T")[0]]),
               status: mastery >= 95 && rev.reviewCount >= 2 ? "mastered" : "active",
             })
             .where(eq(reviewSchedules.id, rev.id));
-        } else {
-          // 首次完成学习，创建复习调度
-          const nextDate = new Date();
-          nextDate.setDate(nextDate.getDate() + 1);
-          await db.insert(reviewSchedules).values({
-            userId: ctx.user.id,
-            planId: todo.planId,
-            nodeTitle: node,
-            subjectTitle: todo.subject,
-            originalStudyDate: today,
-            reviewDates: JSON.stringify([today]),
-            nextReviewDate: formatLocalDate(nextDate),
-            intervalDays: 1,
-            reviewCount: 1,
-            mastery: mastery,
-            status: "active",
-          });
         }
       }
 
-      // 9. 收集错题到错题本（失败不阻断主流程）
+      // 9. 收集错题到错题本
       for (const q of input.questions) {
         const ans = input.answers.find(a => a.questionId === q.id);
         if (!ans) continue;
@@ -995,65 +921,40 @@ export const todoRouter = createRouter({
 
         // 如果答错，收录到错题本
         if (!isCorrect) {
-          try {
-            console.log("[DEBUG wrongAnswers submitTest] processing wrong answer", {
-              qId: q.id,
-              qType: q.questionType,
-              qContentPreview: q.content?.slice(0, 50),
-              hasQuestionId: !!q.id,
-              questionIdValue: q.id,
-              userAnswerPreview: ans.userAnswer?.slice(0, 50),
-            });
-
-            // 查找是否已存在该题目的错题记录
-            const existingWrong = await db
-              .select()
-              .from(wrongAnswers)
-              .where(
-                and(
-                  eq(wrongAnswers.userId, ctx.user.id),
-                  eq(wrongAnswers.questionContent, q.content)
-                )
+          // 查找是否已存在该题目的错题记录
+          const existingWrong = await db
+            .select()
+            .from(wrongAnswers)
+            .where(
+              and(
+                eq(wrongAnswers.userId, ctx.user.id),
+                eq(wrongAnswers.questionContent, q.content)
               )
-              .limit(1);
+            )
+            .limit(1);
 
-            if (existingWrong.length > 0) {
-              // 更新错题记录
-              await db
-                .update(wrongAnswers)
-                .set({
-                  wrongCount: existingWrong[0].wrongCount + 1,
-                  lastWrongAt: new Date(),
-                  mastered: false,
-                })
-                .where(eq(wrongAnswers.id, existingWrong[0].id));
-              console.log("[DEBUG wrongAnswers submitTest] updated existing wrong answer", { id: existingWrong[0].id });
-            } else {
-              // 创建新错题记录
-              const insertValues: any = {
+          if (existingWrong.length > 0) {
+            // 更新错题记录
+            await db
+              .update(wrongAnswers)
+              .set({
+                wrongCount: existingWrong[0].wrongCount + 1,
+                lastWrongAt: new Date(),
+                mastered: false,
+              })
+              .where(eq(wrongAnswers.id, existingWrong[0].id));
+          } else {
+            // 创建新错题记录
+            await db
+              .insert(wrongAnswers)
+              .values({
                 userId: ctx.user.id,
                 questionContent: q.content,
-                correctAnswer: q.correctAnswer,
-                options: q.options ? JSON.stringify(q.options) : null,
                 userAnswer: ans.userAnswer,
                 wrongCount: 1,
                 lastWrongAt: new Date(),
                 mastered: false,
-              };
-              if (q.id) {
-                insertValues.questionId = q.id;
-              }
-              console.log("[DEBUG wrongAnswers submitTest] inserting new wrong answer", { insertKeys: Object.keys(insertValues) });
-              await db.insert(wrongAnswers).values(insertValues);
-              console.log("[DEBUG wrongAnswers submitTest] inserted successfully");
-            }
-          } catch (err) {
-            console.error("[DEBUG wrongAnswers submitTest] FAILED", {
-              error: err instanceof Error ? err.message : String(err),
-              qId: q.id,
-              qContentPreview: q.content?.slice(0, 50),
-            });
-            // 失败不阻断主流程
+              });
           }
         }
       }
@@ -1215,7 +1116,7 @@ export const todoRouter = createRouter({
       z.object({
         reviewId: z.number(),
         questionType: z.enum(["single_choice", "multiple_choice", "fill_blank", "short_answer", "essay", "mixed"]).default("mixed"),
-        count: z.number().min(1).max(100).default(5),
+        count: z.number().min(1).max(20).default(5),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1302,29 +1203,14 @@ export const todoRouter = createRouter({
         return false;
       });
 
-      // 给题目打分并排序（统一评分权重，与 generateTest 保持一致）
+      // 给题目打分并排序（错题权重更高）
       const scoredQuestions = matchedQuestions.map((q) => {
         let score = 0;
-
-        // nodeId 精确匹配 +100 分（最高权重）
+        // 基础匹配分数
         if (nodeId && q.nodeId === nodeId) score += 100;
-
-        // subjectId 精确匹配 +50 分
-        if (subjectId && q.subjectId === subjectId) score += 50;
-
-        // 知识点文本匹配 +40 分
-        if (q.detectedKnowledgePoint) {
-          const kpMatch = review.nodeTitle.toLowerCase().includes(q.detectedKnowledgePoint.toLowerCase()) ||
-            q.detectedKnowledgePoint.toLowerCase().includes(review.nodeTitle.toLowerCase());
-          if (kpMatch) score += 40;
-        }
-
-        // 学科文本匹配 +10 分
-        if (q.detectedSubject) {
-          const subMatch = review.subjectTitle.toLowerCase().includes(q.detectedSubject.toLowerCase()) ||
-            q.detectedSubject.toLowerCase().includes(review.subjectTitle.toLowerCase());
-          if (subMatch) score += 10;
-        }
+        else if (subjectId && q.subjectId === subjectId) score += 50;
+        else if (q.detectedKnowledgePoint) score += 30;
+        else if (q.detectedSubject) score += 10;
 
         // 错题权重：如果是错题，大幅提高分数
         const isWrongAnswer = userWrongAnswers.some(wa =>
@@ -1360,11 +1246,7 @@ export const todoRouter = createRouter({
             correctAnswer: q.correctAnswer,
             explanation: q.explanation || "",
             knowledgePoint: review.nodeTitle,
-            questionType: inferQuestionType({
-              questionType: q.questionType || undefined,
-              options: q.options ? JSON.parse(q.options) : undefined,
-              correctAnswer: q.correctAnswer,
-            }),
+            questionType: q.questionType,
           })),
           source: "database",
           reviewInfo: {
@@ -1395,18 +1277,13 @@ export const todoRouter = createRouter({
       const finalNodeId = nodeId;
 
       for (const q of result.questions) {
-        console.log("[todo.generateReviewTest] 准备插入题目", {
-          content: q.content?.slice(0, 50),
-          hasBackslashChem: q.content?.includes("\\chem"),
-          hasBelChem: q.content?.includes("\x07chem"),
-        });
         const [{ id }] = await db
           .insert(questions)
           .values({
             userId: ctx.user.id,
             subjectId: finalSubjectId,
             nodeId: finalNodeId,
-            questionType: inferQuestionType(q),
+            questionType: (q.questionType || input.questionType) as "single_choice" | "multiple_choice" | "fill_blank" | "short_answer" | "essay" | "mixed",
             content: q.content,
             options: q.options ? JSON.stringify(q.options) : null,
             correctAnswer: q.correctAnswer,
@@ -1424,7 +1301,6 @@ export const todoRouter = createRouter({
         questions: result.questions.map((q, idx) => ({
           ...q,
           id: `ai-${savedQuestionIds[idx]}`,
-          questionType: inferQuestionType(q),
         })),
         source: "ai",
         reviewInfo: {
@@ -1455,7 +1331,6 @@ export const todoRouter = createRouter({
           z.object({
             questionId: z.string(),
             userAnswer: z.string(),
-            imageUrls: z.array(z.string()).optional(),
           })
         ),
       })
@@ -1565,7 +1440,6 @@ export const todoRouter = createRouter({
           return {
             ...q,
             userAnswer: ans?.userAnswer || "",
-            imageUrls: ans?.imageUrls || [],
             isCorrect,
           };
         }),
@@ -1602,64 +1476,40 @@ export const todoRouter = createRouter({
 
         // 如果答错，收录到错题本
         if (!isCorrect) {
-          try {
-            console.log("[DEBUG wrongAnswers submitReviewTest] processing wrong answer", {
-              qId: q.id,
-              qType: q.questionType,
-              qContentPreview: q.content?.slice(0, 50),
-              hasQuestionId: !!q.id,
-              questionIdValue: q.id,
-            });
-
-            // 查找是否已存在该题目的错题记录
-            const existingWrong = await db
-              .select()
-              .from(wrongAnswers)
-              .where(
-                and(
-                  eq(wrongAnswers.userId, ctx.user.id),
-                  eq(wrongAnswers.questionContent, q.content)
-                )
+          // 查找是否已存在该题目的错题记录
+          const existingWrong = await db
+            .select()
+            .from(wrongAnswers)
+            .where(
+              and(
+                eq(wrongAnswers.userId, ctx.user.id),
+                eq(wrongAnswers.questionContent, q.content)
               )
-              .limit(1);
+            )
+            .limit(1);
 
-            if (existingWrong.length > 0) {
-              // 更新错题记录
-              await db
-                .update(wrongAnswers)
-                .set({
-                  wrongCount: existingWrong[0].wrongCount + 1,
-                  lastWrongAt: new Date(),
-                  mastered: false,
-                })
-                .where(eq(wrongAnswers.id, existingWrong[0].id));
-              console.log("[DEBUG wrongAnswers submitReviewTest] updated existing wrong answer", { id: existingWrong[0].id });
-            } else {
-              // 创建新错题记录
-              const insertValues: any = {
+          if (existingWrong.length > 0) {
+            // 更新错题记录
+            await db
+              .update(wrongAnswers)
+              .set({
+                wrongCount: existingWrong[0].wrongCount + 1,
+                lastWrongAt: new Date(),
+                mastered: false,
+              })
+              .where(eq(wrongAnswers.id, existingWrong[0].id));
+          } else {
+            // 创建新错题记录
+            await db
+              .insert(wrongAnswers)
+              .values({
                 userId: ctx.user.id,
                 questionContent: q.content,
-                correctAnswer: q.correctAnswer,
-                options: q.options ? JSON.stringify(q.options) : null,
                 userAnswer: ans.userAnswer,
                 wrongCount: 1,
                 lastWrongAt: new Date(),
                 mastered: false,
-              };
-              if (q.id) {
-                insertValues.questionId = q.id;
-              }
-              console.log("[DEBUG wrongAnswers submitReviewTest] inserting new wrong answer", { insertKeys: Object.keys(insertValues) });
-              await db.insert(wrongAnswers).values(insertValues);
-              console.log("[DEBUG wrongAnswers submitReviewTest] inserted successfully");
-            }
-          } catch (err) {
-            console.error("[DEBUG wrongAnswers submitReviewTest] FAILED", {
-              error: err instanceof Error ? err.message : String(err),
-              qId: q.id,
-              qContentPreview: q.content?.slice(0, 50),
-            });
-            // 失败不阻断主流程
+              });
           }
         }
       }
@@ -1677,10 +1527,10 @@ export const todoRouter = createRouter({
         .update(reviewSchedules)
         .set({
           reviewCount: review.reviewCount + 1,
-          nextReviewDate: formatLocalDate(nextDate),
+          nextReviewDate: nextDate.toISOString().split("T")[0],
           intervalDays: newInterval,
           mastery: finalMastery,
-          reviewDates: JSON.stringify([...existingDates, formatLocalDate()]),
+          reviewDates: JSON.stringify([...existingDates, new Date().toISOString().split("T")[0]]),
           status: finalMastery >= 95 && review.reviewCount >= 2 ? "mastered" : "active",
           snapshot: JSON.stringify(testDetails),
         })

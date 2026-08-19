@@ -253,13 +253,6 @@ export async function chatWithAI(
     const previewContent = content.slice(0, 500);
     const hasMore = content.length > 500 ? `... (总共${content.length}字符)` : "";
     const reasoning = data.choices?.[0]?.message?.reasoning_content;
-    const hasChem = content.includes("\\chem");
-    const hasBel = content.includes("\x07chem");
-    console.log(`[BACKEND chatWithAI] chem-check label=${label} hasBackslashChem=${hasChem} hasBelChem=${hasBel}`);
-    if (hasChem || hasBel) {
-      const idx = content.indexOf(hasChem ? "\\chem" : "\x07chem");
-      console.log(`[BACKEND chatWithAI] chem-snippet label=${label} snippet=${JSON.stringify(content.slice(Math.max(0, idx-20), idx+50))}`);
-    }
     debugLog(`${label} 请求成功`, {
       elapsedMs: elapsed,
       responseLength: content.length,
@@ -320,20 +313,20 @@ export async function analyzeContentForKnowledgeTree(
 
 【核心要求 - 必须严格遵守】
 1. **每个节点必须有唯一的 fullPath**。fullPath 是从根到当前节点的完整路径，格式："章标题 / 节标题 / 小节标题"
-2. **严格按照原文档的目录层级生成节点，至少生成到"节"级别（如"第一节 概述"），如果原文档存在"一、二、三"等更细的小节，也必须生成，绝对不允许为了节省输出而省略任何层级**
+2. **严格按照原文档的目录层级生成节点**，确保每个章节、每个小节都成为一个节点，绝不遗漏任何内容
 3. title 保持简洁（如"概述"），fullPath 包含完整路径用于唯一标识（如"第一章 绪论 / 第一节 概述"）
 4. parentTitle 必须引用父节点的 fullPath（根节点省略此字段）
 5. edges 中的 sourceTitle 和 targetTitle 也必须引用 fullPath
-6. description 控制在20字以内，极度节省输出空间，把空间留给 nodes
-7. **edges 最多只生成5条最核心的关联**（前置知识优先），绝不要生成过多边，把输出空间留给 nodes
-8. **nodes 的完整性是第一优先级**，必须覆盖原文档的所有章节和节，哪怕 edges 为空也要保证 nodes 完整
+6. description 控制在30字以内，节省输出空间
+7. edges 最多生成10条最核心的关联（前置知识优先），不要生成过多边
+8. 优先保证 nodes 的完整性和正确性，edges 可以精简
 9. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
 
-【层级要求 - 绝不省略】
-- 第1层（篇）："第一篇 工业药剂学的基础知识"
-- 第2层（章）："第一篇 工业药剂学的基础知识 / 第一章 绪论"
-- 第3层（节）："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述" —— 必须生成
-- 第4层（小节）："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述" —— 原文有就必须生成
+【fullPath 示例】
+- 根级："第一篇 工业药剂学的基础知识"
+- 章级："第一篇 工业药剂学的基础知识 / 第一章 绪论"
+- 节级："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述"
+- 小节："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述"
 
 请严格按照JSON格式返回，不要包含任何其他文本。格式如下：
 {
@@ -343,7 +336,7 @@ export async function analyzeContentForKnowledgeTree(
     {
       "title": "概述",
       "fullPath": "第一章 绪论 / 第一节 概述",
-      "description": "工业药剂学定义与术语",
+      "description": "阐述工业药剂学定义、常用术语等",
       "level": 3,
       "orderIndex": 0,
       "importance": 4,
@@ -435,20 +428,20 @@ export async function analyzeFilesForKnowledgeTree(
 
 【核心要求 - 必须严格遵守】
 1. **每个节点必须有唯一的 fullPath**。fullPath 是从根到当前节点的完整路径，格式："章标题 / 节标题 / 小节标题"
-2. **严格按照原文档的目录层级生成节点，至少生成到"节"级别（如"第一节 概述"），如果原文档存在"一、二、三"等更细的小节，也必须生成，绝对不允许为了节省输出而省略任何层级**
+2. **严格按照原文档的目录层级生成节点**，确保每个章节、每个小节都成为一个节点，绝不遗漏任何内容
 3. title 保持简洁（如"概述"），fullPath 包含完整路径用于唯一标识（如"第一章 绪论 / 第一节 概述"）
 4. parentTitle 必须引用父节点的 fullPath（根节点省略此字段）
 5. edges 中的 sourceTitle 和 targetTitle 也必须引用 fullPath
-6. description 控制在20字以内，极度节省输出空间，把空间留给 nodes
-7. **edges 最多只生成5条最核心的关联**（前置知识优先），绝不要生成过多边，把输出空间留给 nodes
-8. **nodes 的完整性是第一优先级**，必须覆盖原文档的所有章节和节，哪怕 edges 为空也要保证 nodes 完整
+6. description 控制在30字以内，节省输出空间
+7. edges 最多生成10条最核心的关联（前置知识优先），不要生成过多边
+8. 优先保证 nodes 的完整性和正确性，edges 可以精简
 9. **分析完成后，评估该科目整体难度(1-5)和优先级(1-5)**
 
-【层级要求 - 绝不省略】
-- 第1层（篇）："第一篇 工业药剂学的基础知识"
-- 第2层（章）："第一篇 工业药剂学的基础知识 / 第一章 绪论"
-- 第3层（节）："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述" —— 必须生成
-- 第4层（小节）："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述" —— 原文有就必须生成
+【fullPath 示例】
+- 根级："第一篇 工业药剂学的基础知识"
+- 章级："第一篇 工业药剂学的基础知识 / 第一章 绪论"
+- 节级："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述"
+- 小节："第一篇 工业药剂学的基础知识 / 第一章 绪论 / 第一节 概述 / 一、工业药剂学概述"
 
 请严格按照JSON格式返回，不要包含任何其他文本。格式如下：
 {
@@ -458,7 +451,7 @@ export async function analyzeFilesForKnowledgeTree(
     {
       "title": "概述",
       "fullPath": "第一章 绪论 / 第一节 概述",
-      "description": "工业药剂学定义与术语",
+      "description": "阐述工业药剂学定义、常用术语等",
       "level": 3,
       "orderIndex": 0,
       "importance": 4,
@@ -1103,8 +1096,7 @@ export async function generateQuestionsFromFileUrls(
   apiKey?: string,
   apiUrl?: string,
   modelName?: string,
-  requireChemicalStructure = false,
-  customInstructions?: string
+  requireChemicalStructure = false
 ): Promise<{
   questions: Array<{
     content: string;
@@ -1124,7 +1116,7 @@ export async function generateQuestionsFromFileUrls(
     : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
 
   const chemHint = requireChemicalStructure
-    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 或 options 中嵌入 \\chem{SMILES} 格式（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}），\\chem{} 会被渲染为结构图。结构式放题干、放选项、或两者都有，完全由你根据题目考察意图自行决定。\n9. 【返回前自我检查】生成完所有题目后，请自行 review 一遍，检查题目逻辑是否合理、是否存在自相矛盾或明显泄露答案的设计瑕疵。由你自己判断是否需要修正，确认无误后再返回最终结果。\n10. 化学结构题需额外返回 smiles 和 inchi 字段`
+    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 和 options 中用 \\chem{SMILES} 格式嵌入化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）。选项的 text 字段中必须包含 \\chem{SMILES}，不能只写文字描述。\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
     : "";
 
   const systemPrompt = `你是一个专业的出题AI。请仔细阅读用户提供的文件内容，然后根据内容生成高质量的练习题。
@@ -1144,9 +1136,8 @@ export async function generateQuestionsFromFileUrls(
 4. 提供详细的答案解析
 5. 每道题标注难度(1-5)
 6. mixed模式下，必须混合至少2种不同题型
-7. **分析文件内容所属的学科，以及每道题目考察的具体知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**。注意：这两个字段必须是你从实际输入内容中明确识别出的真实学科和知识点名称，不要编造、泛化或自行分类。
+7. **分析文件内容所属的学科，以及每道题目考察的具体知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**
 8. **【重要】选项内容绝对不能包含答案提示或正确性标识。例如：不要写"（正确答案）"、"（正确）"、"（错误）"等任何暗示对错的文字；不要写"（黄酮...）"这种选项特有的解释性文字**${chemHint}
-9. **【最高优先级】如果用户提供了【用户特殊要求】，这些要求具有最高优先级，必须严格遵守，即使与上述默认规则冲突也应以用户要求为准。**
 
 请返回JSON格式：
 {
@@ -1164,8 +1155,7 @@ export async function generateQuestionsFromFileUrls(
 }`;
 
   // 构建多模态内容
-  const difficultyDesc = difficulty === 0 ? "混合难度，请生成覆盖简单到困难不同难度的题目" : `难度要求 ${difficulty}/5`;
-  const userPrompt = `请根据文件内容生成 ${count} 道 ${typeDesc}，${difficultyDesc}。${customInstructions ? `\n\n【用户特殊要求】${customInstructions}` : ""}`;
+  const userPrompt = `请根据文件内容生成 ${count} 道 ${typeDesc}，难度要求 ${difficulty}/5。`;
   const contentBlocks = await processUrlsToContentBlocks(urls, { modelName, apiKey });
 
   const messages: KimiMessage[] = [
@@ -1179,10 +1169,7 @@ export async function generateQuestionsFromFileUrls(
   const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
-    console.log("[BACKEND generateQuestionsFromFileUrls] before JSON.parse", { resultSlice: result.slice(0, 500), hasBackslashChem: result.includes("\\chem"), hasBelChem: result.includes("\x07chem") });
     const parsed = JSON.parse(result);
-    const firstQ = parsed.questions?.[0];
-    console.log("[BACKEND generateQuestionsFromFileUrls] after JSON.parse", { firstQContentSlice: firstQ?.content?.slice(0, 100), hasBackslashChem: firstQ?.content?.includes("\\chem"), hasBelChem: firstQ?.content?.includes("\x07chem") });
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的题目数据格式不正确");
@@ -1199,8 +1186,7 @@ export async function generateQuestions(
   apiKey?: string,
   apiUrl?: string,
   modelName?: string,
-  requireChemicalStructure = false,
-  customInstructions?: string
+  requireChemicalStructure = false
 ): Promise<{
   questions: Array<{
     content: string;
@@ -1220,7 +1206,7 @@ export async function generateQuestions(
     : questionType === "single_choice" ? "单选题" : questionType === "multiple_choice" ? "多选题" : questionType === "fill_blank" ? "填空题" : questionType === "short_answer" ? "简答题" : "论述题";
 
   const chemHint = requireChemicalStructure
-    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 或 options 中嵌入 \\chem{SMILES} 格式（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}），\\chem{} 会被渲染为结构图。结构式放题干、放选项、或两者都有，完全由你根据题目考察意图自行决定。\n9. 【返回前自我检查】生成完所有题目后，请自行 review 一遍，检查题目逻辑是否合理、是否存在自相矛盾或明显泄露答案的设计瑕疵。由你自己判断是否需要修正，确认无误后再返回最终结果。\n10. 化学结构题需额外返回 smiles 和 inchi 字段`
+    ? `\n8. 【化学结构题特殊要求】如果题目涉及化学分子结构（有机化合物、官能团、同分异构体等），必须在 content 和 options 中用 \\chem{SMILES} 格式嵌入化学结构（如 \\chem{CC(=O)Oc1ccccc1C(=O)O}）。选项的 text 字段中必须包含 \\chem{SMILES}，不能只写文字描述。\n9. 化学结构题需额外返回 smiles 和 inchi 字段`
     : "";
 
   const systemPrompt = `你是一个专业的出题AI。请根据知识点内容生成高质量的练习题。
@@ -1240,9 +1226,8 @@ export async function generateQuestions(
 4. 每道题标注难度(1-5)
 5. 如果题目适合配合图片（如观察图形、图表、示意图等），可以添加imageUrl字段，值为图片描述文字（如"细胞结构示意图"、"二次函数图像"等）
 6. mixed模式下，必须混合至少2种不同题型
-7. **分析题目所属学科和具体考察的知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**。注意：这两个字段必须是你从实际输入内容中明确识别出的真实学科和知识点名称，不要编造、泛化或自行分类。
+7. **分析题目所属学科和具体考察的知识点，并返回在detectedSubject和detectedKnowledgePoint字段中**
 8. **【重要】选项内容绝对不能包含答案提示或正确性标识。例如：不要写"（正确答案）"、"（正确）"、"（错误）"等任何暗示对错的文字；不要写"（黄酮...）"这种选项特有的解释性文字**${chemHint}
-9. **【最高优先级】如果用户提供了【用户特殊要求】，这些要求具有最高优先级，必须严格遵守，即使与上述默认规则冲突也应以用户要求为准。**
 
 请返回JSON格式：
 {
@@ -1267,7 +1252,7 @@ export async function generateQuestions(
 内容：
 ${knowledgeContent.slice(0, 6000)}
 
-${difficulty === 0 ? "难度要求：混合难度，请生成覆盖简单到困难不同难度的题目" : `难度要求：${difficulty}/5`}${customInstructions ? `\n\n【用户特殊要求 - 最高优先级】${customInstructions}` : ""}`;
+难度要求：${difficulty}/5`;
 
   const result = await chatWithAI(
     [
@@ -1281,10 +1266,7 @@ ${difficulty === 0 ? "难度要求：混合难度，请生成覆盖简单到困�
   );
 
   try {
-    console.log("[BACKEND generateQuestions] before JSON.parse", { resultSlice: result.slice(0, 500), hasBackslashChem: result.includes("\\chem"), hasBelChem: result.includes("\x07chem") });
     const parsed = JSON.parse(result);
-    const firstQ = parsed.questions?.[0];
-    console.log("[BACKEND generateQuestions] after JSON.parse", { firstQContentSlice: firstQ?.content?.slice(0, 100), hasBackslashChem: firstQ?.content?.includes("\\chem"), hasBelChem: firstQ?.content?.includes("\x07chem") });
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的题目数据格式不正确");
@@ -1297,7 +1279,6 @@ export async function evaluateAnswer(
   correctAnswer: string,
   userAnswer: string,
   questionType: string,
-  imageUrls?: string[],
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
@@ -1317,15 +1298,11 @@ export async function evaluateAnswer(
   "mastery": 75
 }`;
 
-  const imagePart = imageUrls && imageUrls.length > 0
-    ? `\n用户上传的图片：${imageUrls.join("、")}`
-    : "";
-
   const userPrompt = `题目：${question}
 
 正确答案：${correctAnswer}
 
-用户答案：${userAnswer}${imagePart}
+用户答案：${userAnswer}
 
 题目类型：${questionType}
 
@@ -1488,10 +1465,7 @@ ${content.slice(0, 8000)}
   );
 
   try {
-    console.log("[BACKEND generateQuestionsFromFileUrls] before JSON.parse", { resultSlice: result.slice(0, 500), hasBackslashChem: result.includes("\\chem"), hasBelChem: result.includes("\x07chem") });
     const parsed = JSON.parse(result);
-    const firstQ = parsed.questions?.[0];
-    console.log("[BACKEND generateQuestionsFromFileUrls] after JSON.parse", { firstQContentSlice: firstQ?.content?.slice(0, 100), hasBackslashChem: firstQ?.content?.includes("\\chem"), hasBelChem: firstQ?.content?.includes("\x07chem") });
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的测试题数据格式不正确");
@@ -1651,10 +1625,7 @@ ${knowledgeNodes.map((n, i) => `${i + 1}. ${n}`).join("\n")}
   );
 
   try {
-    console.log("[BACKEND generateTodoTestQuestions] before JSON.parse", { resultSlice: result.slice(0, 500), hasBackslashChem: result.includes("\\chem"), hasBelChem: result.includes("\x07chem") });
     const parsed = JSON.parse(result);
-    const firstQ = parsed.questions?.[0];
-    console.log("[BACKEND generateTodoTestQuestions] after JSON.parse", { firstQContentSlice: firstQ?.content?.slice(0, 100), hasBackslashChem: firstQ?.content?.includes("\\chem"), hasBelChem: firstQ?.content?.includes("\x07chem") });
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的测试题格式不正确");
@@ -1666,7 +1637,7 @@ export async function evaluateTodoTestAnswers(
   subject: string,
   knowledgeNodes: string[],
   questions: Array<{ id: string; content: string; correctAnswer: string; explanation: string; knowledgePoint: string }>,
-  answers: Array<{ questionId: string; userAnswer: string; imageUrls?: string[] }>,
+  answers: Array<{ questionId: string; userAnswer: string }>,
   apiKey?: string,
   apiUrl?: string,
   modelName?: string
@@ -1698,10 +1669,7 @@ export async function evaluateTodoTestAnswers(
 
   const qaPairs = questions.map((q) => {
     const ans = answers.find((a) => a.questionId === q.id);
-    const imagePart = ans?.imageUrls && ans.imageUrls.length > 0
-      ? `\n学生上传的图片：${ans.imageUrls.join("、")}`
-      : "";
-    return `题目：${q.content}\n标准答案：${q.correctAnswer}\n学生答案：${ans?.userAnswer || "未作答"}${imagePart}\n解析：${q.explanation}\n知识点：${q.knowledgePoint}`;
+    return `题目：${q.content}\n标准答案：${q.correctAnswer}\n学生答案：${ans?.userAnswer || "未作答"}\n解析：${q.explanation}\n知识点：${q.knowledgePoint}`;
   }).join("\n\n---\n\n");
 
   const userPrompt = `请评估以下答题情况：
@@ -2120,6 +2088,175 @@ ${localNodes ? JSON.stringify(localNodes.map(n => ({ id: n.id, title: n.title, s
     };
   } catch {
     throw new Error("AI返回的试卷分析数据格式不正确");
+  }
+}
+
+// ========== 从计划文件解析并生成复习计划（基于已有科目和知识树） ==========
+
+export interface AnalyzePlanFromFileSubject {
+  id: number;
+  title: string;
+  description?: string | null;
+}
+
+export interface AnalyzePlanFromFileNode {
+  id: number;
+  subjectId: number;
+  title: string;
+  level: number;
+  estimatedMinutes: number | null;
+  difficulty: number;
+  importance: number;
+  parentTitle?: string | null;
+}
+
+export interface AnalyzePlanFromFileResult {
+  rounds: Array<{
+    round: number;
+    name: string;
+    focus: string;
+    strategy: string;
+    months: number[];
+  }>;
+  months: Array<{
+    month: number;
+    monthName: string;
+    round: number;
+    focus: string;
+    subjects: string[];
+    goals: string[];
+  }>;
+  weeks: Array<{
+    week: number;
+    month: number;
+    focus: string;
+    subjects: string[];
+    knowledgeNodes: string[];
+    goals: string[];
+  }>;
+  days: Array<{
+    day: number;
+    date: string;
+    week: number;
+    month: number;
+    subject: string;
+    knowledgeNodes: string[];
+    estimatedMinutes: number;
+    focus: string;
+    review: boolean;
+  }>;
+  unmatchedContent?: string[];
+}
+
+export async function analyzePlanFromFile(
+  fileUrl: string,
+  subjects: AnalyzePlanFromFileSubject[],
+  knowledgeNodes: AnalyzePlanFromFileNode[],
+  config: {
+    dailyMinutes: number;
+    startDate: string;
+    totalMonths: number;
+    reviewRounds: number;
+    requirements?: string;
+  },
+  apiKey?: string,
+  apiUrl?: string,
+  modelName?: string
+): Promise<AnalyzePlanFromFileResult> {
+  debugLog("analyzePlanFromFile 开始", {
+    fileUrl,
+    subjectCount: subjects.length,
+    nodeCount: knowledgeNodes.length,
+    config,
+  });
+
+  const systemPrompt = `你是一位学习计划解析与编排专家。请仔细阅读用户上传的学习计划文档（可能是课程大纲、复习时间表、教材目录、拍照笔记、手写计划等），并结合系统提供的已有科目和知识树，生成一份完整、可执行的复习计划。
+
+【核心约束 - 必须严格遵守】
+1. **只能使用下面列出的已有科目和知识节点，禁止创造新的科目或节点**
+2. 每个 dailyPlan / weeklyPlan 条目中的 knowledgeNodes 必须从已知知识节点 title 中选择，优先使用文档中明确提到的节点
+3. 如果文档内容无法对应到具体节点，选择最接近的一个或多个节点，并在 unmatchedContent 中记录原文片段
+4. 每天必须安排所有相关科目，同一日期可以有多个科目条目
+5. 每7天安排一次回顾日（review=true），复习当周已学节点
+6. 高难度/高重要性节点分配更多时间
+7. 考虑知识点依赖关系，前置知识优先安排
+8. 如果文档没有明确时间，按总时长合理分配
+9. 输出的 knowledgeNodes 必须使用原文给出的节点 title，不得改写
+
+请返回严格 JSON 格式，不要包含任何其他文本：
+{
+  "rounds": [{"round":1,"name":"基础阶段","focus":"...","strategy":"...","months":[1,2]}],
+  "months": [{"month":1,"monthName":"第1个月","round":1,"focus":"...","subjects":["科目1"],"goals":["目标1"]}],
+  "weeks": [{"week":1,"month":1,"focus":"...","subjects":["科目1"],"knowledgeNodes":["节点1"],"goals":["目标1"]}],
+  "days": [{"day":1,"date":"2026-08-20","week":1,"month":1,"subject":"科目1","knowledgeNodes":["节点1"],"estimatedMinutes":60,"focus":"...","review":false}],
+  "unmatchedContent": ["文档中提到但无法匹配的原文片段"]
+}`;
+
+  const nodeListText = knowledgeNodes
+    .map(
+      (n) =>
+        `- [科目:${subjects.find((s) => s.id === n.subjectId)?.title || "未知"}] ${n.title} (难度:${n.difficulty}, 重要度:${n.importance}, 预计${n.estimatedMinutes || 30}分钟)`
+    )
+    .join("\n");
+
+  const userPrompt = `请根据上传的计划文档，为以下科目生成复习计划：
+
+【已有科目】
+${subjects.map((s) => `- ${s.title}${s.description ? "：" + s.description : ""}`).join("\n")}
+
+【已有知识树节点】
+${nodeListText}
+
+【配置信息】
+- 每日可用时间：${config.dailyMinutes}分钟
+- 开始日期：${config.startDate}
+- 总时长：${config.totalMonths}个月
+- 复习轮数：${config.reviewRounds}轮
+${config.requirements ? `\n用户的特殊需求：${config.requirements}` : ""}
+
+请从上传的文档中读取计划内容，并输出标准 JSON 格式的完整复习计划。`;
+
+  const contentBlocks = await processUrlsToContentBlocks([fileUrl], { modelName, apiKey });
+  contentBlocks.push({ type: "text", text: userPrompt });
+
+  const messages: KimiMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: contentBlocks as KimiContent[] },
+  ];
+
+  const result = await chatWithAI(
+    messages,
+    apiKey,
+    apiUrl,
+    modelName,
+    true,
+    "analyzePlanFromFile"
+  );
+
+  try {
+    const jsonStr = extractJsonFromResponse(result);
+    const parsed = JSON.parse(jsonStr);
+    debugLog("analyzePlanFromFile 解析成功", {
+      roundsCount: parsed.rounds?.length,
+      monthsCount: parsed.months?.length,
+      weeksCount: parsed.weeks?.length,
+      daysCount: parsed.days?.length,
+      unmatchedCount: parsed.unmatchedContent?.length,
+    });
+    return {
+      rounds: parsed.rounds || [],
+      months: parsed.months || [],
+      weeks: parsed.weeks || [],
+      days: parsed.days || [],
+      unmatchedContent: parsed.unmatchedContent || [],
+    };
+  } catch (err) {
+    debugLogError("analyzePlanFromFile JSON解析失败", {
+      rawResponse: result.slice(0, 1000),
+      extractedJson: extractJsonFromResponse(result).slice(0, 1000),
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw new Error("AI返回的计划数据格式不正确");
   }
 }
 
@@ -2751,13 +2888,12 @@ export async function generateWeeklyDailyPlanFromFile(
 
   const systemPrompt = `你是一个科学的学习计划生成AI。请根据文件中的科目和知识树数据，以及周计划概览，生成${config.weekNumber}周的7天详细日计划。
 
-【核心规则 - 必须严格遵守】
-1. **只安排本周涉及的科目**。如果文件中提供了10个科目，但本周计划只涉及其中3个，那么只生成这3个科目的日计划，绝对不要把其他周的科目塞进来
-2. 每天必须安排本周的所有科目，每个科目作为独立条目
-3. 同一天内不同科目使用相同的day和date
-4. 周日设为回顾日（review=true），复习本周所学
-5. 确保day序号从${startDay}到${endDay}
-6. 覆盖周计划中的所有知识点
+【核心规则】
+1. 每天必须安排所有科目，每个科目作为独立条目
+2. 同一天内不同科目使用相同的day和date
+3. 周日设为回顾日（review=true），复习本周所学
+4. 确保day序号从${startDay}到${endDay}
+5. 覆盖周计划中的所有知识点
 
 请返回JSON格式：
 {

@@ -7,8 +7,7 @@ function deleteCookie(name: string) {
 
 export function useAuth() {
   const utils = trpc.useUtils();
-  const { data: user, isLoading, error, isError } = trpc.auth.me.useQuery();
-  console.log("[useAuth] auth.me state:", { isLoading, isError, hasUser: !!user, userId: user?.id, errorMessage: error?.message });
+  const { data: user, isLoading } = trpc.auth.me.useQuery();
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
       deleteCookie("kimiokc_session");
