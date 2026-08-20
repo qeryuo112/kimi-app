@@ -60,6 +60,7 @@ console.log("[UploadServer] 文件清理任务已启用: 每24小时清理一次
 // 允许的扩展名
 const ALLOWED_EXTS = new Set([
   ".pdf", ".doc", ".docx", ".txt", ".md", ".json",
+  ".html", ".htm",
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
   ".mp4", ".mov", ".avi", ".mkv", ".webm"
 ]);

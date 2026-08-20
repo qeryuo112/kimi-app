@@ -1572,7 +1572,7 @@ export default function Plans() {
             <label className="text-sm font-medium">计划文件</label>
             <Input
               type="file"
-              accept=".pdf,.doc,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"
+              accept=".pdf,.doc,.docx,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp"
               onChange={handleUploadPlanFile}
               disabled={isUploadingPlanFile || aiGenerateFromPlanFile.isPending}
             />

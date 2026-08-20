@@ -301,7 +301,7 @@ export default function AiAssistant() {
               <input
                 type="file"
                 multiple
-                accept=".pdf,.doc,.docx,.txt,.md,.png,.jpg,.jpeg"
+                accept=".pdf,.doc,.docx,.txt,.md,.html,.htm,.png,.jpg,.jpeg"
                 onChange={handleFileUpload}
                 className="hidden"
                 id="ai-file-upload"

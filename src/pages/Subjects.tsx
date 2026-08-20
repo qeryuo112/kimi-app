@@ -404,7 +404,7 @@ export default function Subjects() {
                         id="subject-file-input"
                         type="file"
                         multiple
-                        accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                        accept=".pdf,.doc,.docx,.txt,.html,.htm,.png,.jpg,.jpeg"
                         onChange={handleFileUpload}
                         disabled={isUploading}
                         className="hidden"

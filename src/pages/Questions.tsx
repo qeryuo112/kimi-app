@@ -1052,7 +1052,7 @@ export default function Questions() {
                       <Input
                         type="file"
                         multiple
-                        accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                        accept=".pdf,.doc,.docx,.txt,.html,.htm,.png,.jpg,.jpeg"
                         onChange={handleGenFileUpload}
                         disabled={isGenUploading}
                       />
@@ -1207,7 +1207,7 @@ export default function Questions() {
                   <Input
                     type="file"
                     multiple
-                    accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg"
+                    accept=".pdf,.doc,.docx,.txt,.html,.htm,.png,.jpg,.jpeg"
                     onChange={handleFileUpload}
                     disabled={isUploading}
                   />

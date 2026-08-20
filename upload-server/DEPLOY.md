@@ -169,7 +169,7 @@ PUBLIC_URL=http://123.45.67.89:3001 node server.js
 
 **Q: 提示 "不支持的文件类型"？**
 
-A: 目前支持 `.pdf` `.doc` `.docx` `.txt` `.md` `.png` `.jpg` `.jpeg` `.gif` `.webp` `.bmp`，其他类型会被拒绝。如需扩展，修改 `server.js` 中的 `ALLOWED_EXTS`。
+A: 目前支持 `.pdf` `.doc` `.docx` `.txt` `.md` `.html` `.htm` `.png` `.jpg` `.jpeg` `.gif` `.webp` `.bmp`，其他类型会被拒绝。如需扩展，修改 `server.js` 中的 `ALLOWED_EXTS`。
 
 **Q: 文件上传到 VPS 后占满磁盘？**
 
