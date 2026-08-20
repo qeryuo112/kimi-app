@@ -187,3 +187,27 @@ git revert HEAD
 - 选择 `weekly` 时，如果系统里已有月计划，AI 会沿用已有轮次/月安排，只生成周计划
 - 选择 `daily` 时，如果系统里已有周计划，AI 会沿用已有轮次/月/周安排，只生成日计划
 - 选择 `monthly` 时仍为全新生成，会清空已有的周/日计划
+
+---
+
+## 七、删除废弃的 upload-server 独立服务（2026-08-20）
+
+### 变更原因
+原 `upload-server/` 目录下的独立 Express 上传服务已弃用，上传功能实际由主服务 `api/boot.ts` 的 `/upload` 端点统一处理。保留该目录会导致文档与代码不一致。
+
+### 删除的文件/目录
+- `upload-server/server.js`
+- `upload-server/package.json`
+- `upload-server/DEPLOY.md`
+- `upload-server/VERIFY.md`
+
+### 修改的文档
+- `README.md` — 文件存储改为 `/upload` 端点 + OSS，移除 upload-server 部署说明
+- `DEPLOY.md` — 移除“文件上传服务（upload-server）”章节，更新环境表格和注意事项
+- `SUMMARY.md` — 将“上传服务器”改为“上传接口”，移除独立服务启动说明
+- `.gitignore` — 移除 `upload-server/package-lock.json` 条目
+
+### 实际行为
+- 文件上传仍通过 `POST /upload` 进行
+- 后端白名单校验在 `api/boot.ts` 中维护
+- 上传后的文件继续写入阿里云 OSS 并返回 URL

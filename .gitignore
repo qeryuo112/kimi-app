@@ -54,4 +54,3 @@ OLLAMA_DEPLOY.md
 Modelfile-*
 *.bat
 test-model.mjs
-upload-server/package-lock.json

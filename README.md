@@ -12,7 +12,7 @@
 | 后端 | Hono + tRPC + Drizzle ORM |
 | 数据库 | MySQL 8.0 |
 | AI | OpenAI 兼容 API（默认 GLM-4.6V，支持所有 OpenAI 兼容模型） |
-| 文件存储 | upload-server（Express + Multer，独立部署） |
+| 文件存储 | `/upload` 端点（Hono）+ 阿里云 OSS |
 
 ---
 
@@ -59,13 +59,7 @@ scp dist/boot.js root@server:/var/www/kimiokc/dist/boot.js
 pm2 restart kimiokc
 ```
 
-### 3. 文件上传服务（upload-server，端口 3001）
-
-```bash
-pm2 start upload-server/index.js --name kimiokc-upload
-```
-
-### 4. 数据库同步
+### 3. 数据库同步
 
 ```bash
 npx drizzle-kit push
