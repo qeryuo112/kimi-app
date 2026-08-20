@@ -211,3 +211,49 @@ git revert HEAD
 - 文件上传仍通过 `POST /upload` 进行
 - 后端白名单校验在 `api/boot.ts` 中维护
 - 上传后的文件继续写入阿里云 OSS 并返回 URL
+
+---
+
+## 八、新增 MCP Bridge API（2026-08-20）
+
+### 背景
+让 kaoyan349 MCP 服务器（zcode 本地 stdio MCP）把数据层切换到远程 kimiokc，实现题库/知识树/复习数据的双向流动。
+
+### 新增文件
+- `api/lib/mcp-auth.ts` — API Key 鉴权中间件
+- `api/mcp-router.ts` — MCP Bridge 路由
+
+### 修改的文件
+- `api/lib/env.ts` — 新增 `MCP_API_KEY`、`MCP_USER_ID`
+- `api/boot.ts` — 挂载 `/api/mcp` 路由
+- `.env.example` — 新增 MCP Bridge 环境变量
+
+### 新增端点
+
+所有端点均需 header `X-MCP-API-Key`。
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/api/mcp/subjects` | 列出学科 |
+| GET | `/api/mcp/subjects/:id/chapters` | 学科下 level≤2 的节点 |
+| GET | `/api/mcp/knowledge-nodes` | 搜索知识点 |
+| GET | `/api/mcp/questions` | 筛选题目 |
+| GET | `/api/mcp/questions/:id` | 单题详情 |
+| POST | `/api/mcp/questions` | 批量新增/更新题目 |
+| DELETE | `/api/mcp/questions/:id` | 删除题目 |
+| POST | `/api/mcp/quiz` | 组卷 |
+| POST | `/api/mcp/answers` | 提交答案并判分 |
+| GET | `/api/mcp/wrong-answers` | 错题本 |
+| POST | `/api/mcp/wrong-answers/:id/resolve` | 标记错题已掌握 |
+| GET | `/api/mcp/review-queue` | 今日复习队列 |
+| POST | `/api/mcp/review-queue/:id/record` | 记录复习结果 |
+| GET | `/api/mcp/progress` | 学科进度报告 |
+| POST | `/api/mcp/import/document` | 解析文档返回文本 |
+
+### 鉴权方式
+- 请求头 `X-MCP-API-Key` 必须等于环境变量 `MCP_API_KEY`
+- 操作固定使用 `MCP_USER_ID` 指定的用户
+
+### 部署注意事项
+- 服务器 `.env` 必须配置 `MCP_API_KEY` 和 `MCP_USER_ID`
+- MCP 客户端（kaoyan349）需要配置 `KIMIOKC_BASE_URL` 和 `MCP_API_KEY`
