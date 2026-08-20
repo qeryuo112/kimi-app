@@ -15,4 +15,6 @@ export const env = {
   databaseUrl: required("DATABASE_URL"),
   aiApiBaseUrl: process.env.AI_API_BASE_URL ?? "",
   ownerUnionId: process.env.OWNER_UNION_ID ?? "",
+  mcpApiKey: process.env.MCP_API_KEY ?? "",
+  mcpUserId: Number(process.env.MCP_USER_ID) || 1,
 };
