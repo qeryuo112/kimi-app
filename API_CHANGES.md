@@ -257,3 +257,46 @@ git revert HEAD
 ### 部署注意事项
 - 服务器 `.env` 必须配置 `MCP_API_KEY` 和 `MCP_USER_ID`
 - MCP 客户端（kaoyan349）需要配置 `KIMIOKC_BASE_URL` 和 `MCP_API_KEY`
+
+---
+
+## 九、扩展 MCP Bridge 端点（2026-08-20 Phase 1.5）
+
+### 背景
+kaoyan349 侧需要把科目、章节、知识点、题目更新等操作也写入 kimiokc，因此扩展 Bridge。
+
+### 新增端点
+
+| Method | Path | 说明 |
+|---|---|---|
+| POST | `/api/mcp/subjects` | 新增科目 |
+| GET | `/api/mcp/subjects/:id` | 取单科详情 |
+| POST | `/api/mcp/knowledge-nodes` | 新增知识树节点（章节/知识点统一） |
+| PATCH | `/api/mcp/knowledge-nodes/:id` | 更新节点 |
+| GET | `/api/mcp/knowledge-nodes/:id` | 取单节点详情 |
+| GET | `/api/mcp/knowledge-nodes` | 增加 `title` 查询参数，用于按标题幂等 |
+| PUT | `/api/mcp/questions/:id` | 更新题目 |
+| GET | `/api/mcp/questions/count` | 题目计数 |
+
+### 行为说明
+- 新增题目仍走 `POST /api/mcp/questions`。
+- 349 特有题型（`matching/prescription/name_def/case`）在 kaoyan349 客户端映射为 kimiokc 支持的枚举，并在 `explanation` 中保留原类型。
+- 写操作仍以 `X-MCP-API-Key` 鉴权，并固定使用 `MCP_USER_ID`。
+
+---
+
+## 十、MCP Bridge 端点参数扩展（2026-08-21）
+
+### 背景
+kaoyan349 客户端补齐桥接模式时，三个端点需要支持可选参数（均向后兼容，缺省行为不变）。
+
+### 变更明细
+
+| 端点 | 新增参数 | 说明 |
+|---|---|---|
+| `POST /api/mcp/answers` | `score?`(0-1)、`isCorrect?` | AI 深度批改覆盖：传入后跳过远端评估，直接按覆盖值判分并执行错题收录/掌握度更新 |
+| `GET /api/mcp/wrong-answers` | `mastered?`（0/1，默认 0） | `mastered=1` 返回已掌握错题，支持客户端 `resolved=1/2` 语义 |
+| `GET /api/mcp/review-queue` | `includeFuture?`（1/0） | `includeFuture=1` 返回全部 active 调度（含未到期），供客户端学习计划按到期日聚合 |
+
+### 回退方式
+删除对应参数分支即可，不影响既有调用。
