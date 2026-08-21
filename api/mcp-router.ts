@@ -637,7 +637,7 @@ app.get("/progress", async (c) => {
       .where(and(eq(userAnswers.userId, userId), eq(questions.subjectId, s.id)));
 
     const [{ correct }] = await db
-      .select({ correct: sql<number>`count(*)` })
+      .select({ correct: sql<number>`count(distinct ${userAnswers.questionId})` })
       .from(userAnswers)
       .leftJoin(questions, eq(questions.id, userAnswers.questionId))
       .where(

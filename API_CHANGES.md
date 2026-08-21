@@ -300,3 +300,13 @@ kaoyan349 客户端补齐桥接模式时，三个端点需要支持可选参数�
 
 ### 回退方式
 删除对应参数分支即可，不影响既有调用。
+
+---
+
+## 十一、修复 /progress 正确数统计口径（2026-08-21）
+
+### 问题
+`GET /api/mcp/progress` 的 `correctCount` 按答题记录全量计数（`count(*)`），而 `answeredQuestions` 按题目去重（`count(distinct questionId)`），同一题多次作答时会出现 `correctCount > answeredQuestions`、正确率越界（如 2.0）的情况。
+
+### 修复
+`correctCount` 改为 `count(distinct questionId) where isCorrect=true`，与 `answeredQuestions` 口径一致（答过的题目中做对的题目数）。
