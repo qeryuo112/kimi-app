@@ -39,6 +39,51 @@ async function getAiTemperature(): Promise<number> {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 2 ? parsed : 0.5;
 }
 
+// 思考强度配置（全局）：OpenAI 系默认 xhigh；DeepSeek/Kimi-K3/GLM-5.2+ 由路由函数归一化为各厂商最强值
+async function getAiReasoningEffort(): Promise<string> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, "aiReasoningEffort"));
+  return row?.value || "xhigh";
+}
+
+// 按模型名解析思考参数，解决不同厂商/模型思考强度格式的兼容性：
+//   OpenAI 推理模型  -> reasoning_effort: <配置值>（默认 xhigh）
+//   DeepSeek         -> reasoning_effort: max（官方映射 xhigh→high，max 才是最强）+ thinking.enabled
+//   Kimi K3          -> reasoning_effort: max
+//   Kimi K2.x        -> thinking.enabled（不支持 reasoning_effort）
+//   GLM-5.2+         -> reasoning_effort: max
+//   GLM-4.x          -> thinking.enabled（reasoning_effort 被静默忽略）
+//   未知模型          -> 不传思考参数，避免 400
+interface ThinkingParams {
+  reasoningEffort?: string;
+  thinking?: boolean;
+}
+
+export function resolveThinkingParams(model: string, configuredEffort: string): ThinkingParams {
+  const m = model.toLowerCase();
+  if (/^(gpt-5|o1|o3|o4|o[0-9]|chatgpt-)/.test(m) || m.includes("reasoning")) {
+    return { reasoningEffort: configuredEffort || "xhigh" };
+  }
+  if (m.startsWith("deepseek")) {
+    return { reasoningEffort: "max", thinking: true };
+  }
+  if (m.startsWith("kimi")) {
+    if (/kimi-k3/.test(m)) return { reasoningEffort: "max" };
+    return { thinking: true };
+  }
+  if (m.startsWith("glm")) {
+    const ver = m.match(/glm-(\d+)\.(\d+)/);
+    if (ver && (parseInt(ver[1], 10) > 5 || (parseInt(ver[1], 10) === 5 && parseInt(ver[2], 10) >= 2))) {
+      return { reasoningEffort: "max" };
+    }
+    return { thinking: true };
+  }
+  return {};
+}
+
 // ========== 调试日志工具 ==========
 const DEBUG_LOG_FILE = path.join(process.cwd(), "ai-debug.log");
 
@@ -188,14 +233,16 @@ export async function chatWithAI(
     url = clean.endsWith("/v1") ? clean + "/chat/completions" : clean + "/v1/chat/completions";
   }
 
-  const [maxTokens, enableThinking, temperature] = await Promise.all([
+  const [maxTokens, enableThinking, temperature, reasoningEffort] = await Promise.all([
     getAiMaxTokens(),
     getAiEnableThinking(),
     getAiTemperature(),
+    getAiReasoningEffort(),
   ]);
 
+  const model = modelName || "glm-4.6v";
   const body: Record<string, unknown> = {
-    model: modelName || "glm-4.6v",
+    model,
     messages,
     temperature,
     max_tokens: maxTokens,
@@ -203,8 +250,16 @@ export async function chatWithAI(
   if (requireJson) {
     body.response_format = { type: "json_object" };
   }
+  // 思考强度：按模型路由到各厂商支持的参数格式；aiEnableThinking 为总开关
+  let thinkingParams: ThinkingParams = {};
   if (enableThinking) {
-    body.thinking = { type: "enabled" };
+    thinkingParams = resolveThinkingParams(model, reasoningEffort);
+    if (thinkingParams.reasoningEffort) {
+      body.reasoning_effort = thinkingParams.reasoningEffort;
+    }
+    if (thinkingParams.thinking) {
+      body.thinking = { type: "enabled" };
+    }
   }
 
   // 计算请求体大致大小用于调试
@@ -223,6 +278,7 @@ export async function chatWithAI(
     promptChars: promptLength,
     requireJson,
     temperature,
+    thinkingParams,
   });
 
   try {

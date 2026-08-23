@@ -310,3 +310,37 @@ kaoyan349 客户端补齐桥接模式时，三个端点需要支持可选参数�
 
 ### 修复
 `correctCount` 改为 `count(distinct questionId) where isCorrect=true`，与 `answeredQuestions` 口径一致（答过的题目中做对的题目数）。
+
+---
+
+## 十二、AI 调用增加思考强度（reasoning effort）支持（2026-08-23）
+
+### 背景
+项目所有 AI 调用（出题/判分/计划/知识点分析等 30+ 功能）此前仅支持 `thinking: {type:"enabled"}`（智谱格式），无法控制思考强度。新增全局配置 `aiReasoningEffort`（默认 `xhigh`），并按模型厂商归一化为各厂商最强值，解决不同 API 思考参数格式的兼容性。
+
+### 新增/修改的文件
+- `api/lib/ai.ts`：
+  - 新增 `getAiReasoningEffort()`（读 appSettings `aiReasoningEffort`，默认 `xhigh`）
+  - 新增 `resolveThinkingParams(model, effort)` 模型路由函数（已导出）
+  - `chatWithAI` 请求体按路由结果追加 `reasoning_effort` / `thinking.enabled`；`aiEnableThinking` 仍为总开关；debugLog 记录 `thinkingParams` 便于排查
+- `api/settings-router.ts`：`aiReasoningEffort` 全局配置读写（仅管理员），取值 `xhigh/max/high/low`
+- `src/pages/Settings.tsx`：新增"AI 思考强度"下拉框（全局，仅管理员可编辑）
+
+### 模型兼容矩阵（路由规则）
+
+| 模型 | 实际请求参数 | 说明 |
+|---|---|---|
+| OpenAI 推理模型（gpt-5*/o*） | `reasoning_effort: <配置值>`（默认 xhigh） | 用户指定 xhigh；若模型不支持 xhigh 需配置调低 |
+| DeepSeek（v4 系等） | `reasoning_effort: max` + `thinking.enabled` | 官方映射 xhigh→high，max 才是最强 |
+| Kimi K3 | `reasoning_effort: max` | 官方默认即 max |
+| Kimi K2.x | `thinking.enabled` | 不支持 reasoning_effort |
+| 智谱 GLM-5.2+ | `reasoning_effort: max` | |
+| 智谱 GLM-4.x（默认 glm-4.6v） | `thinking.enabled` | reasoning_effort 被静默忽略 |
+| 未知模型 | 不传思考参数 | 避免 400 |
+
+### 数据库
+无表结构变更；`app_settings` 表新增可选键 `aiReasoningEffort`（不设则默认 xhigh）。
+
+### 注意事项
+- 思考模式下 DeepSeek 的 temperature/top_p 等参数无效（不报错），沿用现有行为。
+- 生产已验证：`gpt-5.6-luna` 请求解析出 `reasoningEffort: "xhigh"` 并写入请求体。
