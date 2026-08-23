@@ -10,6 +10,21 @@ import { processUrlsToContentBlocks, type ProcessedContent } from "./document-pr
 
 const DEFAULT_MAX_TOKENS = 128000;
 
+// 强 JSON 指令：追加到 requireJson 请求的最后一条 user 消息。
+// 部分模型/中转站对 response_format 支持不完整（实测 gpt-5.6-luna 经中转对"请返回JSON"软指令不遵守），
+// 直接命令式措辞可显著提高纯 JSON 输出的稳定性。
+const STRICT_JSON_INSTRUCTION =
+  "必须只输出一个合法的 JSON 对象，必须完整包含任务要求的所有字段，不要输出任何其他文字、解释、注释或 Markdown 代码块标记。";
+
+// 解析 AI 返回内容为 JSON：先做格式提取，原文完全不含 JSON 时抛错（与直接 JSON.parse 语义一致）
+export function parseAiJson(result: string): any {
+  const trimmed = (result || "").trim();
+  if (trimmed.indexOf("{") === -1 && trimmed.indexOf("[") === -1) {
+    throw new Error("AI 返回内容不含 JSON");
+  }
+  return JSON.parse(extractJsonFromResponse(result));
+}
+
 async function getAiMaxTokens(): Promise<number> {
   const db = getDb();
   const [row] = await db
@@ -249,6 +264,19 @@ export async function chatWithAI(
   };
   if (requireJson) {
     body.response_format = { type: "json_object" };
+    // 强指令追加到最后一条 user 文本消息（拷贝数组，不污染调用方）
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "user" && typeof m.content === "string") {
+        body.messages = messages.map((x, idx) =>
+          idx === i ? { ...x, content: (x.content as string) + "\n\n" + STRICT_JSON_INSTRUCTION } : x
+        );
+        break;
+      }
+    }
+    if (!body.messages) body.messages = messages;
+  } else {
+    body.messages = messages;
   }
   // 思考强度：按模型路由到各厂商支持的参数格式；aiEnableThinking 为总开关
   let thinkingParams: ThinkingParams = {};
@@ -650,7 +678,7 @@ ${content.slice(0, 8000)}
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return {
       skills: parsed.skills || [],
     };
@@ -715,7 +743,7 @@ export async function analyzeFilesForSkills(
   const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return {
       skills: parsed.skills || [],
     };
@@ -776,7 +804,7 @@ export async function searchAndAnalyzeSubjects(
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return { subjects: parsed.subjects || [] };
   } catch {
     throw new Error("AI返回的科目数据格式不正确");
@@ -874,7 +902,7 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     debugLog("generateRoundAndMonthlyPlan 解析成功", { roundsCount: parsed.rounds?.length, monthsCount: parsed.months?.length });
     return {
       rounds: parsed.rounds || [],
@@ -963,7 +991,7 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     debugLog("generateWeeklyPlan 解析成功", { weeksCount: parsed.weeks?.length });
     return { weeks: parsed.weeks || [] };
   } catch (err) {
@@ -1134,7 +1162,7 @@ ${requirements ? `\n用户的特殊需求：${requirements}` : ""}`;
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     debugLog("generateDailyPlanBatch 解析成功", { daysCount: parsed.days?.length });
     return { days: parsed.days || [] };
   } catch (err) {
@@ -1225,7 +1253,7 @@ export async function generateQuestionsFromFileUrls(
   const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的题目数据格式不正确");
@@ -1322,7 +1350,7 @@ ${knowledgeContent.slice(0, 6000)}
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的题目数据格式不正确");
@@ -1376,13 +1404,33 @@ export async function evaluateAnswer(
   );
 
   try {
-    const parsed = JSON.parse(result);
-    return {
-      isCorrect: parsed.isCorrect || false,
-      score: parsed.score || 0,
-      feedback: parsed.feedback || "",
-      mastery: parsed.mastery || 0,
-    };
+    const parsed = parseAiJson(result);
+    // 兼容字段缺失/别名：模型可能输出 {"is_correct":true} / {"correct":true} 等
+    const isCorrect =
+      parsed.isCorrect !== undefined
+        ? !!parsed.isCorrect
+        : parsed.is_correct !== undefined
+          ? !!parsed.is_correct
+          : parsed.correct !== undefined
+            ? !!parsed.correct
+            : undefined;
+    if (typeof parsed === "object" && parsed !== null && isCorrect !== undefined) {
+      const score = typeof parsed.score === "number" ? parsed.score : NaN;
+      const feedback =
+        typeof parsed.feedback === "string" && parsed.feedback
+          ? parsed.feedback
+          : typeof parsed.evaluation === "string"
+            ? parsed.evaluation
+            : "";
+      const mastery = typeof parsed.mastery === "number" ? parsed.mastery : NaN;
+      return {
+        isCorrect,
+        score: Number.isFinite(score) ? score : isCorrect ? 100 : 0,
+        feedback: feedback || (isCorrect ? "回答正确！" : "回答错误。"),
+        mastery: Number.isFinite(mastery) ? mastery : isCorrect ? 80 : 20,
+      };
+    }
+    throw new Error("评估结果缺少判分字段");
   } catch {
     // 简单字符串匹配作为fallback
     const normalizedCorrect = correctAnswer.toLowerCase().trim();
@@ -1444,7 +1492,7 @@ ${content || "无详细内容"}
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return {
       quality: Math.max(1, Math.min(5, parsed.quality || 3)),
       feedback: parsed.feedback || "",
@@ -1521,7 +1569,7 @@ ${content.slice(0, 8000)}
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的测试题数据格式不正确");
@@ -1593,7 +1641,7 @@ ${nodesInfo}
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return {
       plan: parsed.plan || [],
     };
@@ -1681,7 +1729,7 @@ ${knowledgeNodes.map((n, i) => `${i + 1}. ${n}`).join("\n")}
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的测试题格式不正确");
@@ -1748,7 +1796,7 @@ ${qaPairs}`;
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return {
       mastery: Math.max(0, Math.min(100, parsed.mastery || 0)),
       correctCount: parsed.correctCount || 0,
@@ -1859,7 +1907,7 @@ export async function generateTodoTestFromFiles(
   const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的测试题格式不正确");
@@ -1940,7 +1988,7 @@ export async function recognizeQuestionsFromUrls(
   const result = await chatWithAI(messages, apiKey, apiUrl, modelName, true);
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return { questions: parsed.questions || [] };
   } catch {
     throw new Error("AI返回的题目数据格式不正确");
@@ -2134,7 +2182,7 @@ ${localNodes ? JSON.stringify(localNodes.map(n => ({ id: n.id, title: n.title, s
   );
 
   try {
-    const parsed = JSON.parse(result);
+    const parsed = parseAiJson(result);
     return {
       overallDifficulty: parsed.overallDifficulty || 3,
       difficultyDistribution: parsed.difficultyDistribution || { easy: 33, medium: 34, hard: 33 },

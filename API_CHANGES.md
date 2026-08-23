@@ -344,3 +344,19 @@ kaoyan349 客户端补齐桥接模式时，三个端点需要支持可选参数�
 ### 注意事项
 - 思考模式下 DeepSeek 的 temperature/top_p 等参数无效（不报错），沿用现有行为。
 - 生产已验证：`gpt-5.6-luna` 请求解析出 `reasoningEffort: "xhigh"` 并写入请求体。
+
+---
+
+## 十三、AI 输出 JSON 稳定性修复（2026-08-23）
+
+### 背景
+实测发现：评估类 system prompt（"请返回JSON格式：{示例}"软指令）在 gpt-5.6-luna（经中转站 cdn.sta1n.cn）上不生效，模型稳定输出自然语言而非 JSON，导致 `evaluateAnswer` 等 30+ 处 JSON 解析失败、判分落到字符串匹配 fallback。对照实验证明非中转站/参数问题（`response_format`/`reasoning_effort`/`temperature` 均无关），是 prompt 措辞问题——直接命令式指令（"用JSON回答"）稳定生效。
+
+### 修改内容（均在 `api/lib/ai.ts`）
+1. **强指令后缀**：新增 `STRICT_JSON_INSTRUCTION`（"必须只输出一个合法的 JSON 对象，必须完整包含任务要求的所有字段…"），`chatWithAI` 在 `requireJson=true` 时自动追加到最后一条 user 文本消息（拷贝数组，不污染调用方）——一处改动覆盖全部调用。
+2. **容错解析**：新增 `parseAiJson()`（原文不含 `{`/`[` 时抛错，与直接 `JSON.parse` 语义一致；含 JSON 时先 `extractJsonFromResponse` 提取），替换 17 处直接 `JSON.parse(result)`。
+3. **evaluateAnswer 字段兼容**：支持 `isCorrect`/`is_correct`/`correct` 别名与 `feedback`/`evaluation` 别名；字段缺失或类型不符时回退字符串匹配（保持原 fallback 行为）。
+
+### 验证
+- 生产实测：答对 `{"is_correct":true,"correct_answer":"A","user_answer":"A"}`、答错 `{"is_correct":false,...,"evaluation":"回答错误。"}` 均被正确解析，判分走 AI 而非 fallback。
+- 边界单测：纯 JSON / markdown 包裹 / 前缀废话 / 纯文本 / 空串 5 例通过。
