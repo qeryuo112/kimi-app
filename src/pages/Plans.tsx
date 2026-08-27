@@ -232,8 +232,18 @@ export default function Plans() {
 
   const generateTodos = trpc.todo.generateTodayTodos.useMutation({
     onSuccess: (data) => {
+      if (data.generated) {
+        toast.success(`已生成 ${data.count} 个今日任务`);
+      } else if (data.action === "generate_weekly_daily") {
+        toast.info(data.message || "请先生成当前周的日计划");
+      } else {
+        toast.info(data.message || "今日任务已生成");
+      }
       utils.todo.getToday.invalidate();
-      toast.success(data.generated ? `已生成 ${data.count} 个今日任务` : data.message);
+      utils.todo.getReviews.invalidate();
+      if (expandedPlan !== null) {
+        utils.plan.getById.invalidate({ id: expandedPlan });
+      }
     },
     onError: (err) => toast.error(err.message),
   });

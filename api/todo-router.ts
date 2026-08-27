@@ -14,7 +14,8 @@ import {
   questions,
   wrongAnswers,
 } from "@db/schema";
-import { eq, and, lte, desc, inArray } from "drizzle-orm";
+import { eq, and, lte, desc, inArray, asc } from "drizzle-orm";
+import { addBusinessDays, diffBusinessDays, formatLocalDate, getBusinessDate } from "./lib/date-utils";
 import { generateTodoTestQuestions, generateTodoTestFromFiles, evaluateTodoTestAnswers } from "./lib/ai";
 
 // 根据掌握度计算下一次复习间隔（间隔重复算法）
@@ -31,153 +32,156 @@ export const todoRouter = createRouter({
     .input(z.object({ planId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const today = new Date().toISOString().split("T")[0];
+      const today = getBusinessDate();
 
-      // 检查今天是否已生成过
-      const existing = await db
-        .select()
-        .from(dailyTodos)
-        .where(
-          and(
-            eq(dailyTodos.userId, ctx.user.id),
-            eq(dailyTodos.planId, input.planId),
-            eq(dailyTodos.date, today)
-          )
-        );
-
-      if (existing.length > 0) {
-        return { generated: false, message: "今日任务已生成", count: existing.length };
-      }
-
-      // 获取计划
+      // 获取计划并确认归属
       const [plan] = await db
         .select()
         .from(plans)
         .where(and(eq(plans.id, input.planId), eq(plans.userId, ctx.user.id)));
+      if (!plan || !plan.aiPlan) throw new Error("计划不存在或未生成复习计划");
 
-      if (!plan || !plan.aiPlan) {
-        throw new Error("计划不存在或未生成复习计划");
-      }
-
-      let dailyPlan: any[] = [];
+      let parsedPlan: any;
       try {
-        const parsed = JSON.parse(plan.aiPlan);
-        dailyPlan = parsed.dailyPlan || [];
+        parsedPlan = JSON.parse(plan.aiPlan);
       } catch {
         throw new Error("计划数据格式错误");
       }
+      const dailyPlan: any[] = Array.isArray(parsedPlan.dailyPlan) ? parsedPlan.dailyPlan : [];
+      if (dailyPlan.length === 0) throw new Error("计划中没有日计划数据");
 
-      if (dailyPlan.length === 0) {
-        throw new Error("计划中没有日计划数据");
-      }
+      const startDate = formatLocalDate(plan.startDate);
+      const fallbackDayIndex = diffBusinessDays(startDate, today) + 1;
+      const datedPlanItems = dailyPlan.filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item?.date || ""));
+      const firstDailyDate = datedPlanItems.map((item) => item.date).sort()[0];
+      const dateBasedDayIndex = firstDailyDate ? diffBusinessDays(firstDailyDate, today) + 1 : undefined;
+      const datedItems = dailyPlan.filter((item) => item?.date === today);
+      const todayItems = datedItems.length > 0
+        ? datedItems
+        : dailyPlan.filter((item) => !item?.date && item?.day === fallbackDayIndex);
+      const currentWeek = todayItems.find((item) => Number.isInteger(item?.week))?.week
+        ?? (dateBasedDayIndex && dateBasedDayIndex > 0 ? Math.ceil(dateBasedDayIndex / 7) : undefined)
+        ?? (fallbackDayIndex > 0 ? Math.ceil(fallbackDayIndex / 7) : undefined);
+      const hasWeeklyPlan = currentWeek !== undefined && Array.isArray(parsedPlan.weeklyPlan)
+        && parsedPlan.weeklyPlan.some((item: any) => item?.week === currentWeek);
+      const hasDailyPlanForWeek = currentWeek !== undefined
+        && dailyPlan.some((item) => item?.week === currentWeek);
 
-      // 计算今天是第几天（从开始日期算起）
-      const startDate = plan.startDate
-        ? new Date(plan.startDate).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0];
-
-      const start = new Date(startDate);
-      const todayDate = new Date(today);
-      const dayDiff = Math.floor((todayDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-      const todayDayIndex = dayDiff + 1;
-
-      // 找到今天的计划项
-      const todayItems = dailyPlan.filter((d: any) => d.day === todayDayIndex);
-
-      // 同时查找复习调度中今天需要复习的内容
+      // 今天及逾期复习都应进入今日任务
       const todayReviews = await db
         .select()
         .from(reviewSchedules)
-        .where(
-          and(
-            eq(reviewSchedules.userId, ctx.user.id),
-            eq(reviewSchedules.planId, input.planId),
-            eq(reviewSchedules.nextReviewDate, today),
-            eq(reviewSchedules.status, "active")
-          )
-        );
+        .where(and(
+          eq(reviewSchedules.userId, ctx.user.id),
+          eq(reviewSchedules.planId, input.planId),
+          lte(reviewSchedules.nextReviewDate, today),
+          eq(reviewSchedules.status, "active")
+        ))
+        .orderBy(asc(reviewSchedules.nextReviewDate));
 
-      const created = [];
+      const existing = await db
+        .select()
+        .from(dailyTodos)
+        .where(and(
+          eq(dailyTodos.userId, ctx.user.id),
+          eq(dailyTodos.planId, input.planId),
+          eq(dailyTodos.date, today)
+        ));
+      const existingNewKeys = new Set(existing.filter((item) => item.dayIndex !== 0).map((item) => `${item.dayIndex}|${item.subject}`));
+      const existingReviewKeys = new Set(existing.filter((item) => item.dayIndex === 0).flatMap((item) => {
+        try { return (JSON.parse(item.knowledgeNodes || "[]") as string[]).map((node) => `${item.subject}|${node}`); }
+        catch { return []; }
+      }));
+      const created: number[] = [];
 
-      // 插入今日新学任务
-      for (const item of todayItems) {
-        const [{ id }] = await db
-          .insert(dailyTodos)
-          .values({
-            userId: ctx.user.id,
-            planId: input.planId,
-            date: today,
-            dayIndex: item.day,
-            subject: item.subject || "",
-            knowledgeNodes: JSON.stringify(item.knowledgeNodes || []),
-            estimatedMinutes: item.estimatedMinutes || plan.dailyMinutes,
-            focus: item.focus || "",
-            status: "pending",
-          })
-          .$returningId();
-        created.push(id);
-
-        // 为新知识点创建复习调度
-        const nodes = item.knowledgeNodes || [];
-        for (const node of nodes) {
-          const existingReview = await db
-            .select()
-            .from(reviewSchedules)
-            .where(
-              and(
-                eq(reviewSchedules.userId, ctx.user.id),
-                eq(reviewSchedules.planId, input.planId),
-                eq(reviewSchedules.nodeTitle, node)
-              )
-            );
-
-          if (existingReview.length === 0) {
-            // 首次学习，安排第一次复习（1天后）
-            const nextDate = new Date(today);
-            nextDate.setDate(nextDate.getDate() + 1);
-            await db.insert(reviewSchedules).values({
+      await db.transaction(async (tx) => {
+        for (const item of todayItems) {
+          const newKey = `${item.day}|${item.subject || ""}`;
+          if (!existingNewKeys.has(newKey)) {
+            const [{ id }] = await tx.insert(dailyTodos).values({
               userId: ctx.user.id,
               planId: input.planId,
-              nodeTitle: node,
-              subjectTitle: item.subject || "",
-              originalStudyDate: today,
-              reviewDates: JSON.stringify([]),
-              nextReviewDate: nextDate.toISOString().split("T")[0],
-              intervalDays: 1,
-              reviewCount: 0,
-              mastery: 0,
-              status: "active",
-            });
+              date: today,
+              dayIndex: item.day,
+              subject: item.subject || "",
+              knowledgeNodes: JSON.stringify(item.knowledgeNodes || []),
+              estimatedMinutes: item.estimatedMinutes || plan.dailyMinutes,
+              focus: item.focus || "",
+              status: "pending",
+            }).$returningId();
+            created.push(id);
+            existingNewKeys.add(newKey);
+          }
+          for (const node of item.knowledgeNodes || []) {
+            const existingReview = await tx.select().from(reviewSchedules).where(and(
+              eq(reviewSchedules.userId, ctx.user.id),
+              eq(reviewSchedules.planId, input.planId),
+              eq(reviewSchedules.nodeTitle, node),
+              eq(reviewSchedules.subjectTitle, item.subject || "")
+            ));
+            if (existingReview.length === 0) {
+              await tx.insert(reviewSchedules).values({
+                userId: ctx.user.id,
+                planId: input.planId,
+                nodeTitle: node,
+                subjectTitle: item.subject || "",
+                originalStudyDate: today,
+                reviewDates: JSON.stringify([]),
+                nextReviewDate: addBusinessDays(today, 1),
+                intervalDays: 1,
+                reviewCount: 0,
+                mastery: 0,
+                status: "active",
+              });
+            }
           }
         }
-      }
-
-      // 插入今日复习任务（作为todo）
-      for (const rev of todayReviews) {
-        const [{ id }] = await db
-          .insert(dailyTodos)
-          .values({
+        for (const rev of todayReviews) {
+          const key = `${rev.subjectTitle}|${rev.nodeTitle}`;
+          if (existingReviewKeys.has(key)) continue;
+          const [{ id }] = await tx.insert(dailyTodos).values({
             userId: ctx.user.id,
             planId: input.planId,
             date: today,
-            dayIndex: 0, // 复习任务标记为0
+            dayIndex: 0,
             subject: rev.subjectTitle,
             knowledgeNodes: JSON.stringify([rev.nodeTitle]),
             estimatedMinutes: 30,
             focus: `复习：${rev.nodeTitle}（第${rev.reviewCount + 1}次复习）`,
             status: "pending",
-          })
-          .$returningId();
-        created.push(id);
-      }
+          }).$returningId();
+          created.push(id);
+          existingReviewKeys.add(key);
+        }
+      });
 
-      return { generated: true, count: created.length };
+      if (created.length === 0 && todayItems.length === 0 && todayReviews.length === 0) {
+        const message = currentWeek === undefined
+          ? "今天没有对应的日计划，请先生成当前周的周计划和日计划"
+          : !hasWeeklyPlan
+            ? `今天没有对应的日计划，请先生成第${currentWeek}周周计划，再生成该周日计划`
+            : !hasDailyPlanForWeek
+              ? `第${currentWeek}周尚未生成日计划，请先生成第${currentWeek}周日计划`
+              : `第${currentWeek}周没有${today}的日计划，请检查或重新生成该周日计划`;
+        return { generated: false, count: 0, date: today, currentWeek, suggestedWeek: currentWeek, dailyPlanAvailable: true, todayPlanAvailable: false, message, action: "generate_weekly_daily" as const };
+      }
+      return {
+        generated: created.length > 0,
+        count: created.length,
+        date: today,
+        currentWeek,
+        suggestedWeek: currentWeek,
+        dailyPlanAvailable: true,
+        todayPlanAvailable: todayItems.length > 0,
+        overdueReviewCount: todayReviews.filter((item) => item.nextReviewDate !== today).length,
+        message: created.length > 0 ? undefined : "今日任务已生成",
+      };
     }),
 
   // 获取今日任务（所有计划汇总）
   getToday: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
-    const today = new Date().toISOString().split("T")[0];
+    const today = getBusinessDate();
 
     const todos = await db
       .select()
@@ -217,7 +221,7 @@ export const todoRouter = createRouter({
     )
     .query(async ({ ctx, input }) => {
       const db = getDb();
-      const targetDate = input?.date || new Date().toISOString().split("T")[0];
+      const targetDate = input?.date || getBusinessDate();
 
       const conditions = [
         eq(reviewSchedules.userId, ctx.user.id),
@@ -378,10 +382,11 @@ export const todoRouter = createRouter({
         }
 
         // 错题权重：如果是错题，大幅提高分数
-        const isWrongAnswer = userWrongAnswers.some(wa =>
-          wa.questionContent === q.content ||
-          (wa.questionContent && q.content && wa.questionContent.includes(q.content.substring(0, 50)))
-        );
+        const isWrongAnswer = userWrongAnswers.some((wa) => {
+          const question = allQuestions.find((candidate) => candidate.id === wa.questionId);
+          return question?.content === q.content ||
+            (question?.content && q.content && question.content.includes(q.content.substring(0, 50)));
+        });
         if (isWrongAnswer) score += 200;
 
         return { question: q, score };
@@ -431,7 +436,6 @@ export const todoRouter = createRouter({
           .insert(questions)
           .values({
             userId: ctx.user.id,
-            subjectId: todo.subjectId,
             questionType: q.questionType || input.questionType,
             content: q.content,
             options: q.options ? JSON.stringify(q.options) : null,
@@ -500,7 +504,6 @@ export const todoRouter = createRouter({
           .insert(questions)
           .values({
             userId: ctx.user.id,
-            subjectId: todo.subjectId,
             questionType: q.questionType || input.questionType,
             content: q.content,
             options: q.options ? JSON.stringify(q.options) : null,
@@ -544,7 +547,7 @@ export const todoRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const today = new Date().toISOString().split("T")[0];
+      const today = getBusinessDate();
 
       const [todo] = await db
         .select()
@@ -872,8 +875,7 @@ export const todoRouter = createRouter({
 
         if (rev) {
           const newInterval = calculateNextInterval(rev.intervalDays, mastery);
-          const nextDate = new Date();
-          nextDate.setDate(nextDate.getDate() + newInterval);
+          const nextReviewDate = addBusinessDays(todo.date, newInterval);
 
           const existingDates = (() => {
             try {
@@ -887,10 +889,10 @@ export const todoRouter = createRouter({
             .update(reviewSchedules)
             .set({
               reviewCount: rev.reviewCount + 1,
-              nextReviewDate: nextDate.toISOString().split("T")[0],
+              nextReviewDate,
               intervalDays: newInterval,
               mastery: Math.max(rev.mastery, mastery),
-              reviewDates: JSON.stringify([...existingDates, new Date().toISOString().split("T")[0]]),
+              reviewDates: JSON.stringify([...existingDates, todo.date]),
               status: mastery >= 95 && rev.reviewCount >= 2 ? "mastered" : "active",
             })
             .where(eq(reviewSchedules.id, rev.id));
@@ -928,7 +930,7 @@ export const todoRouter = createRouter({
             .where(
               and(
                 eq(wrongAnswers.userId, ctx.user.id),
-                eq(wrongAnswers.questionContent, q.content)
+                eq(wrongAnswers.questionId, Number(q.id.replace(/^q-/, "")))
               )
             )
             .limit(1);
@@ -949,7 +951,7 @@ export const todoRouter = createRouter({
               .insert(wrongAnswers)
               .values({
                 userId: ctx.user.id,
-                questionContent: q.content,
+                questionId: Number(q.id.replace(/^q-/, "")),
                 userAnswer: ans.userAnswer,
                 wrongCount: 1,
                 lastWrongAt: new Date(),
@@ -1213,10 +1215,11 @@ export const todoRouter = createRouter({
         else if (q.detectedSubject) score += 10;
 
         // 错题权重：如果是错题，大幅提高分数
-        const isWrongAnswer = userWrongAnswers.some(wa =>
-          wa.questionContent === q.content ||
-          (wa.questionContent && q.content && wa.questionContent.includes(q.content.substring(0, 50)))
-        );
+        const isWrongAnswer = userWrongAnswers.some((wa) => {
+          const question = allQuestions.find((candidate) => candidate.id === wa.questionId);
+          return question?.content === q.content ||
+            (question?.content && q.content && question.content.includes(q.content.substring(0, 50)));
+        });
         if (isWrongAnswer) score += 200;
 
         // 未掌握的知识点优先
@@ -1416,8 +1419,7 @@ export const todoRouter = createRouter({
 
       // 计算下一次复习间隔
       const newInterval = calculateNextInterval(review.intervalDays, finalMastery);
-      const nextDate = new Date();
-      nextDate.setDate(nextDate.getDate() + newInterval);
+      const nextReviewDate = addBusinessDays(getBusinessDate(), newInterval);
 
       // 收集测试详情用于保存
       const testDetails: any = {
@@ -1483,7 +1485,7 @@ export const todoRouter = createRouter({
             .where(
               and(
                 eq(wrongAnswers.userId, ctx.user.id),
-                eq(wrongAnswers.questionContent, q.content)
+                eq(wrongAnswers.questionId, Number(q.id.replace(/^q-/, "")))
               )
             )
             .limit(1);
@@ -1504,7 +1506,7 @@ export const todoRouter = createRouter({
               .insert(wrongAnswers)
               .values({
                 userId: ctx.user.id,
-                questionContent: q.content,
+                questionId: Number(q.id.replace(/^q-/, "")),
                 userAnswer: ans.userAnswer,
                 wrongCount: 1,
                 lastWrongAt: new Date(),
@@ -1527,10 +1529,10 @@ export const todoRouter = createRouter({
         .update(reviewSchedules)
         .set({
           reviewCount: review.reviewCount + 1,
-          nextReviewDate: nextDate.toISOString().split("T")[0],
+          nextReviewDate,
           intervalDays: newInterval,
           mastery: finalMastery,
-          reviewDates: JSON.stringify([...existingDates, new Date().toISOString().split("T")[0]]),
+          reviewDates: JSON.stringify([...existingDates, getBusinessDate()]),
           status: finalMastery >= 95 && review.reviewCount >= 2 ? "mastered" : "active",
           snapshot: JSON.stringify(testDetails),
         })
