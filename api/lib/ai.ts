@@ -316,6 +316,27 @@ async function streamChatCompletion(
     }
     if (!resp.body) throw new Error("AI 流式响应无 body");
 
+    const contentType = resp.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("text/event-stream")) {
+      const raw = await resp.text();
+      try {
+        const data = JSON.parse(raw) as KimiResponse;
+        const content = data.choices?.[0]?.message?.content || "";
+        if (!content) throw new Error("AI 非流式响应内容为空");
+        debugLog(`${label} 收到非 SSE 响应`, {
+          contentType,
+          responseLength: content.length,
+        });
+        return content;
+      } catch (err) {
+        throw new Error(
+          `AI 流式响应格式错误（content-type=${contentType || "unknown"}）：${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
+    }
+
     const { content, reasoningLength, chunkCount } = await parseSseStream(
       resp.body.getReader(),
       () => {
@@ -423,6 +444,7 @@ export async function chatWithAI(
     messages,
     temperature,
     max_tokens: maxTokens,
+    stream: true,
   };
   if (requireJson) {
     body.response_format = { type: "json_object" };
@@ -464,6 +486,7 @@ export async function chatWithAI(
     url,
     model: modelName || "gpt-4o",
     bodySizeMB,
+    bodyStream: body.stream,
     messagesCount: messages.length,
     promptChars: promptLength,
     requireJson,
@@ -502,7 +525,13 @@ export async function chatWithAI(
         debugLog(`${label} 流式请求被拒(400)，回退非流式`, {
           error: (err as Error).message.slice(0, 300),
         });
-        content = await nonStreamCompletion(url, body, headers, label, startTime);
+        content = await nonStreamCompletion(
+          url,
+          { ...body, stream: false },
+          headers,
+          label,
+          startTime
+        );
       } else {
         throw err;
       }
