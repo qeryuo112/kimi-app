@@ -2,13 +2,20 @@
 import { env } from "./env";
 import fs from "fs";
 import path from "path";
-import axios from "axios";
 import { getDb } from "../queries/connection";
 import { appSettings } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { processUrlsToContentBlocks, type ProcessedContent } from "./document-processor";
 
 const DEFAULT_MAX_TOKENS = 128000;
+
+// 流式请求：总超时 3600 秒（与原 axios timeout 一致）；空闲超时 120 秒（超过中转 Cloudflare 代理窗口）
+const TOTAL_TIMEOUT_MS = 3_600_000;
+const STREAM_IDLE_TIMEOUT_MS = 120_000;
+
+// 浏览器 UA：部分中转（如 cdn.sta1n.cn 的 Cloudflare）会拦截默认 Node UA
+const HTTP_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
 
 // 强 JSON 指令：追加到 requireJson 请求的最后一条 user 消息。
 // 部分模型/中转站对 response_format 支持不完整（实测 gpt-5.6-luna 经中转对"请返回JSON"软指令不遵守），
@@ -227,6 +234,161 @@ interface KimiResponse {
   }>;
 }
 
+// ========== 流式（SSE）请求 ==========
+// 解析 SSE 字节流，累积 choices[0].delta.content。
+// 每收到一次数据回调 onData（用于外层空闲超时检测）。
+export async function parseSseStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onData: () => void
+): Promise<{ content: string; reasoningLength: number; chunkCount: number }> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let reasoningLength = 0;
+  let chunkCount = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    onData();
+    buffer += decoder.decode(value, { stream: true });
+
+    let idx: number;
+    while ((idx = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (!line || line.startsWith(":")) continue; // 空行 / SSE 注释（心跳）
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      if (payload === "[DONE]") return { content, reasoningLength, chunkCount };
+      try {
+        const obj = JSON.parse(payload);
+        const delta = obj?.choices?.[0]?.delta;
+        if (delta) {
+          if (typeof delta.content === "string" && delta.content) content += delta.content;
+          if (typeof delta.reasoning_content === "string" && delta.reasoning_content) {
+            reasoningLength += delta.reasoning_content.length;
+          }
+        }
+        chunkCount++;
+      } catch {
+        // 忽略无法解析的行，不因单个坏 chunk 中断整个流
+      }
+    }
+  }
+  return { content, reasoningLength, chunkCount };
+}
+
+interface HttpErrorWithStatus extends Error {
+  status?: number;
+}
+
+// 流式请求：fetch + SSE 解析。空闲 120 秒无数据或总超时 3600 秒时中止。
+async function streamChatCompletion(
+  url: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string>,
+  label: string,
+  startTime: number
+): Promise<string> {
+  const controller = new AbortController();
+  const totalTimer = setTimeout(() => controller.abort("total"), TOTAL_TIMEOUT_MS);
+  let lastDataAt = Date.now();
+  const idleTimer = setInterval(() => {
+    if (Date.now() - lastDataAt > STREAM_IDLE_TIMEOUT_MS) controller.abort("idle");
+  }, 10_000);
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      const err: HttpErrorWithStatus = new Error(
+        `AI API调用失败 (${resp.status}): ${errText || resp.statusText}`
+      );
+      err.status = resp.status;
+      throw err;
+    }
+    if (!resp.body) throw new Error("AI 流式响应无 body");
+
+    const { content, reasoningLength, chunkCount } = await parseSseStream(
+      resp.body.getReader(),
+      () => {
+        lastDataAt = Date.now();
+      }
+    );
+    debugLog(`${label} 流式结束`, {
+      elapsedMs: Date.now() - startTime,
+      chunkCount,
+      responseLength: content.length,
+      reasoningLength,
+    });
+    return content;
+  } catch (err) {
+    const e = err as Error & { cause?: unknown };
+    if (e?.name === "AbortError") {
+      if (e.cause === "idle") {
+        throw new Error(
+          `AI 流式响应中断（${STREAM_IDLE_TIMEOUT_MS / 1000} 秒未收到数据）。请稍后重试。`
+        );
+      }
+      throw new Error(
+        `AI API请求超时（超过${TOTAL_TIMEOUT_MS / 60_000}分钟未响应）。请检查网络连接或稍后重试。`
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(totalTimer);
+    clearInterval(idleTimer);
+  }
+}
+
+// 非流式请求：仅在中转不支持流式（400）时作为回退路径
+async function nonStreamCompletion(
+  url: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string>,
+  label: string,
+  startTime: number
+): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort("total"), TOTAL_TIMEOUT_MS);
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      throw new Error(`AI API调用失败 (${resp.status}): ${errText || resp.statusText}`);
+    }
+    const data = (await resp.json()) as KimiResponse;
+    const content = data.choices?.[0]?.message?.content || "";
+    debugLog(`${label} 非流式请求成功`, {
+      elapsedMs: Date.now() - startTime,
+      responseLength: content.length,
+    });
+    return content;
+  } catch (err) {
+    const e = err as Error & { cause?: unknown };
+    if (e?.name === "AbortError") {
+      throw new Error(
+        `AI API请求超时（超过${TOTAL_TIMEOUT_MS / 60_000}分钟未响应）。请检查网络连接或稍后重试。`
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // 调用AI API进行对话
 export async function chatWithAI(
   messages: KimiMessage[],
@@ -310,57 +472,56 @@ export async function chatWithAI(
   });
 
   try {
-    debugLog(`${label} 发起axios请求`, { url, bodyLength: bodyStr.length });
-    console.log("[BACKEND chatWithAI] POST", url, "bodyLength=", bodyStr.length, "messagesCount=", messages.length);
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+      "User-Agent": HTTP_USER_AGENT,
+    };
+    debugLog(`${label} 发起请求`, { url, bodyLength: bodyStr.length, mode: "stream" });
+    console.log(
+      "[BACKEND chatWithAI] POST",
+      url,
+      "bodyLength=",
+      bodyStr.length,
+      "messagesCount=",
+      messages.length,
+      "mode=stream"
+    );
     // 打印每条消息的content类型
     messages.forEach((m, i) => {
       const contentType = typeof m.content === "string" ? "string" : Array.isArray(m.content) ? `array[${m.content.length}]` : "unknown";
       console.log(`[BACKEND chatWithAI] msg[${i}] role=${m.role} contentType=${contentType}`);
     });
 
-    const response = await axios.post(url, body, {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-      },
-      timeout: 3600000, // 3600秒 = 1小时超时
-      responseType: "json",
-    });
+    let content: string;
+    try {
+      content = await streamChatCompletion(url, body, headers, label, startTime);
+    } catch (err) {
+      // 中转拒绝流式（400）时回退非流式重试一次
+      if ((err as HttpErrorWithStatus)?.status === 400) {
+        debugLog(`${label} 流式请求被拒(400)，回退非流式`, {
+          error: (err as Error).message.slice(0, 300),
+        });
+        content = await nonStreamCompletion(url, body, headers, label, startTime);
+      } else {
+        throw err;
+      }
+    }
 
     const elapsed = Date.now() - startTime;
-
-    debugLog(`${label} 收到响应`, { status: response.status });
-    const data = response.data as KimiResponse;
-    const content = data.choices?.[0]?.message?.content || "";
-
-    // 记录响应的前500字符用于调试
-    const previewContent = content.slice(0, 500);
-    const hasMore = content.length > 500 ? `... (总共${content.length}字符)` : "";
-    const reasoning = data.choices?.[0]?.message?.reasoning_content;
     debugLog(`${label} 请求成功`, {
       elapsedMs: elapsed,
       responseLength: content.length,
-      firstChars: previewContent + hasMore,
-      choicesCount: data.choices?.length || 0,
-      hasReasoning: !!reasoning,
-      reasoningLength: reasoning?.length || 0,
+      firstChars: content.slice(0, 500) + (content.length > 500 ? `... (总共${content.length}字符)` : ""),
+      mode: "stream",
     });
     return content;
   } catch (err) {
     const elapsed = Date.now() - startTime;
-    console.error("[BACKEND chatWithAI] ERROR:", axios.isAxiosError(err) ? `${err.response?.status} ${JSON.stringify(err.response?.data)}` : String(err));
-    if (axios.isAxiosError(err) && err.code === "ECONNABORTED") {
-      debugLogError(`${label} 请求超时 (已耗时${elapsed}ms)`, err);
-      throw new Error(`AI API请求超时（超过3600秒未响应）。请检查网络连接或稍后重试。`);
-    }
-    if (axios.isAxiosError(err)) {
-      const status = err.response?.status;
-      const errorData = err.response?.data;
-      debugLogError(`${label} API错误 ${status || "unknown"} (耗时${elapsed}ms)`, errorData || err.message);
-      throw new Error(`AI API调用失败 (${status}): ${JSON.stringify(errorData) || err.message}`);
-    }
-    debugLogError(`${label} 请求异常 (耗时${elapsed}ms)`, err);
-    throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[BACKEND chatWithAI] ERROR:", msg);
+    debugLogError(`${label} API错误 (耗时${elapsed}ms)`, { message: msg });
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 

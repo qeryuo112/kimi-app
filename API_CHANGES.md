@@ -360,3 +360,29 @@ kaoyan349 客户端补齐桥接模式时，三个端点需要支持可选参数�
 ### 验证
 - 生产实测：答对 `{"is_correct":true,"correct_answer":"A","user_answer":"A"}`、答错 `{"is_correct":false,...,"evaluation":"回答错误。"}` 均被正确解析，判分走 AI 而非 fallback。
 - 边界单测：纯 JSON / markdown 包裹 / 前缀废话 / 纯文本 / 空串 5 例通过。
+
+---
+
+## 十四、AI 调用流式化（SSE），绕过中转站超时墙（2026-08-27）
+
+### 背景
+生产日志统计显示 AI 调用共 23 个错误块，其中当日最活跃的问题是 `analyzePlanFromFile.monthly`（月计划生成）连续 3 次 **Cloudflare 524**：gpt-5.6-luna 走中转站 `cdn.sta1n.cn`，15 科目 572 知识点全量 prompt（54KB）+ `reasoning_effort: xhigh`，单次生成超过中转 Cloudflare 的 **120 秒代理读超时**，连接被掐断（错误明确标注 `retryable: true`）。另有历史 8/1 的 kimi-k2.6 504（900 秒）同类问题。
+
+实测结论（对 cdn.sta1n.cn 4 次请求验证）：
+- 中转支持 `stream: true`，标准 SSE（`data: {...chunk...}`），`reasoning_content` 与 `content` 均正常推送；
+- `stream` + `response_format: json_object` + `reasoning_effort: xhigh` 组合无冲突；
+- 真实规模 prompt（25KB+，含知识树）流式下 **153 秒完成，全程每 20 秒持续推流无中断**——Cloudflare 的超时按"等待数据间隔"计时，流式持续推送数据即可绕过 120 秒墙。
+
+### 修改内容（`api/lib/ai.ts`）
+1. **流式主路径**：`chatWithAI` 请求改用 `fetch` + `AbortController`，新增 `parseSseStream()` 逐行解析 SSE（累积 `delta.content`，忽略 `reasoning_content`，遇 `[DONE]` 或 EOF 结束，坏 chunk 跳过不中断）。
+2. **非流式自动回退**：中转拒绝流式（HTTP 400）时自动以 `nonStreamCompletion()`（fetch 非流式）重试一次，兼容任何不支持流式的端点。
+3. **超时语义**：总超时 3600 秒（与原 axios timeout 一致）；新增 120 秒空闲超时（无任何数据即中止，报"流式响应中断"）。
+4. **UA 头**：请求增加浏览器 UA（实测 urllib 默认 UA 被中转 Cloudflare 拦截返回 403，axios 虽未被拦，统一加 UA 更稳）。
+5. 移除 `axios` 依赖（ai.ts 内唯一使用点）。
+
+### 返回约定
+`chatWithAI` 返回签名不变（完整 content 字符串），全部调用方零改动；`requireJson` 强指令与思考强度参数（`reasoning_effort`/`thinking`）逻辑不变。
+
+### 验证
+- 单测 7 例（`api/lib/ai-sse.test.ts`）：content 累积、EOF 无 [DONE]、坏 JSON 行跳过、注释/空行忽略、字节级拆块拼接、onData 回调、紧凑 data 前缀——全部通过。
+- 生产流式实测：25KB prompt + xhigh 153 秒完整返回 JSON。
