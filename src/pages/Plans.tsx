@@ -232,18 +232,8 @@ export default function Plans() {
 
   const generateTodos = trpc.todo.generateTodayTodos.useMutation({
     onSuccess: (data) => {
-      if (data.generated) {
-        toast.success(`已生成 ${data.count} 个今日任务`);
-      } else if (data.action === "generate_weekly_daily") {
-        toast.info(data.message || "请先生成当前周的日计划");
-      } else {
-        toast.info(data.message || "今日任务已生成");
-      }
       utils.todo.getToday.invalidate();
-      utils.todo.getReviews.invalidate();
-      if (expandedPlan !== null) {
-        utils.plan.getById.invalidate({ id: expandedPlan });
-      }
+      toast.success(data.generated ? `已生成 ${data.count} 个今日任务` : data.message);
     },
     onError: (err) => toast.error(err.message),
   });
@@ -849,17 +839,6 @@ export default function Plans() {
                             size="sm"
                             onClick={() => {
                               setExpandedPlan(plan.id);
-                              // 根据当前计划已有层级智能推荐生成范围
-                              let recommendedScope: "monthly" | "weekly" | "daily" = "monthly";
-                              try {
-                                const schedule = JSON.parse(plan.aiPlan || "{}");
-                                if (schedule?.monthlyPlan?.length > 0) {
-                                  recommendedScope = schedule?.weeklyPlan?.length > 0 ? "daily" : "weekly";
-                                }
-                              } catch {
-                                // 解析失败时使用默认月计划
-                              }
-                              setUploadPlanScope(recommendedScope);
                               setShowUploadPlanDialog(true);
                               // 默认选中当前计划已关联的科目
                               if (planDetail?.subjects) {
@@ -1509,7 +1488,6 @@ export default function Plans() {
         <div className="space-y-4 mt-2">
           <p className="text-sm text-muted-foreground">
             上传你的复习计划文件（PDF、Word、图片等），AI将结合已选科目的本地知识树生成标准计划。
-            若计划已有月/周计划，AI会在已有上层框架内继续细化，不会打乱已有结构。
           </p>
 
           {/* 科目选择 */}
@@ -1570,10 +1548,10 @@ export default function Plans() {
             </div>
             <p className="text-xs text-muted-foreground">
               {uploadPlanScope === "monthly"
-                ? "全新生成轮次和月计划，会清空已有周/日计划"
+                ? "只生成轮次和月计划，后续可手动生成周/日计划"
                 : uploadPlanScope === "weekly"
-                ? "基于已有轮次/月计划生成周计划，会清空已有日计划"
-                : "基于已有轮次/月/周计划生成完整日计划"}
+                ? "生成到周计划，后续可分周生成每日任务"
+                : "一次性生成完整四层计划"}
             </p>
           </div>
 
@@ -1582,7 +1560,7 @@ export default function Plans() {
             <label className="text-sm font-medium">计划文件</label>
             <Input
               type="file"
-              accept=".pdf,.doc,.docx,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp"
+              accept=".pdf,.doc,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"
               onChange={handleUploadPlanFile}
               disabled={isUploadingPlanFile || aiGenerateFromPlanFile.isPending}
             />

@@ -15,7 +15,7 @@
 | 进程管理 | PM2 |
 | 数据库 | MySQL 8.0 |
 | 项目路径 | `/opt/kimiokc` |
-| 文件上传 | `/upload` 端点（主服务内，上传至 OSS） |
+| 上传服务路径 | `/root/upload-server` |
 
 ---
 
@@ -128,7 +128,29 @@ ssh -i ~/.ssh/ab12.pem root@47.103.72.72 "pm2 status && pm2 logs kimiokc --lines
 
 ---
 
-## 四、常用运维命令
+## 四、文件上传服务（upload-server）
+
+upload-server 是独立部署的文件上传服务，端口 `3001`。
+
+### 首次部署
+
+参考 `upload-server/DEPLOY.md`，使用 systemd 管理：
+
+```bash
+sudo systemctl start upload-server
+sudo systemctl enable upload-server
+```
+
+### 更新
+
+```bash
+scp -r upload-server root@47.103.72.72:/root/upload-server
+ssh root@47.103.72.72 "sudo systemctl restart upload-server"
+```
+
+---
+
+## 五、常用运维命令
 
 ```bash
 # 查看服务状态
@@ -165,4 +187,4 @@ npm run db:generate
 
 1. **源码与产物分离**：服务器上的 `api/lib/ai.ts` 等源码只是备份，生产环境实际运行的是 `dist/boot.js`。本地构建后只需上传 `dist/boot.js` 即可。
 2. **PM2 配置**：`ecosystem.config.cjs` 在 `/opt/kimiokc/` 下，如需修改启动参数请编辑该文件后 `pm2 restart`。
-3. **上传服务已合并**：文件上传由主服务的 `/upload` 端点处理，不再使用独立的 `upload-server`。
+3. **上传服务独立**：`upload-server` 使用 systemd 管理，与主服务分离，更新时互不影响。

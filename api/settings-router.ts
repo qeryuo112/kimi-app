@@ -7,10 +7,6 @@ import { eq } from "drizzle-orm";
 const AI_MAX_TOKENS_KEY = "aiMaxTokens";
 const AI_ENABLE_THINKING_KEY = "aiEnableThinking";
 const AI_TEMPERATURE_KEY = "aiTemperature";
-const AI_REASONING_EFFORT_KEY = "aiReasoningEffort";
-
-// 思考强度取值：OpenAI 系用 xhigh，DeepSeek/Kimi-K3/GLM-5.2+ 用 max，无分级的模型自动走 thinking.enabled
-const REASONING_EFFORT_VALUES = ["xhigh", "max", "high", "low"] as const;
 
 async function getGlobalSetting(key: string): Promise<string> {
   const db = getDb();
@@ -42,13 +38,11 @@ export const settingsRouter = createRouter({
     const aiEnableThinking = (await getGlobalSetting(AI_ENABLE_THINKING_KEY)) !== "false";
     const aiTemperatureRaw = await getGlobalSetting(AI_TEMPERATURE_KEY);
     const aiTemperature = aiTemperatureRaw ? parseFloat(aiTemperatureRaw) : 0.5;
-    const aiReasoningEffort = (await getGlobalSetting(AI_REASONING_EFFORT_KEY)) || "xhigh";
 
     const globalSettings = {
       aiMaxTokens,
       aiEnableThinking,
       aiTemperature,
-      aiReasoningEffort,
     };
 
     if (!settings) {
@@ -83,7 +77,6 @@ export const settingsRouter = createRouter({
         aiMaxTokens: z.number().min(1).optional(),
         aiEnableThinking: z.boolean().optional(),
         aiTemperature: z.number().min(0).max(2).optional(),
-        aiReasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
         defaultDifficulty: z.number().min(1).max(5).optional(),
         dailyGoal: z.number().optional(),
         weekGoal: z.number().optional(),
@@ -92,7 +85,7 @@ export const settingsRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const { aiMaxTokens: inputMaxTokens, aiEnableThinking: inputEnableThinking, aiTemperature: inputTemperature, aiReasoningEffort: inputReasoningEffort, ...userFields } = input;
+      const { aiMaxTokens: inputMaxTokens, aiEnableThinking: inputEnableThinking, aiTemperature: inputTemperature, ...userFields } = input;
 
       // 全局配置仅管理员可修改
       if (inputMaxTokens !== undefined) {
@@ -112,12 +105,6 @@ export const settingsRouter = createRouter({
           throw new Error("仅管理员可修改 AI 温度");
         }
         await setGlobalSetting(AI_TEMPERATURE_KEY, String(inputTemperature));
-      }
-      if (inputReasoningEffort !== undefined) {
-        if (ctx.user.role !== "admin") {
-          throw new Error("仅管理员可修改 AI 思考强度");
-        }
-        await setGlobalSetting(AI_REASONING_EFFORT_KEY, inputReasoningEffort);
       }
 
       // 其他字段更新到用户设置
@@ -145,7 +132,6 @@ export const settingsRouter = createRouter({
       const aiEnableThinking = (await getGlobalSetting(AI_ENABLE_THINKING_KEY)) !== "false";
       const aiTemperatureRaw = await getGlobalSetting(AI_TEMPERATURE_KEY);
       const aiTemperature = aiTemperatureRaw ? parseFloat(aiTemperatureRaw) : 0.5;
-      const aiReasoningEffort = (await getGlobalSetting(AI_REASONING_EFFORT_KEY)) || "xhigh";
-      return { ...settings, aiMaxTokens, aiEnableThinking, aiTemperature, aiReasoningEffort };
+      return { ...settings, aiMaxTokens, aiEnableThinking, aiTemperature };
     }),
 });

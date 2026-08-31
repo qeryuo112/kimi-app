@@ -8,7 +8,6 @@ import { env } from "./lib/env";
 import path from "path";
 import { nanoid } from "nanoid";
 import { uploadBufferToOSS, isOSSConfigured } from "./lib/oss";
-import mcpRouter from "./mcp-router";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -35,10 +34,6 @@ app.post("/upload", async (c) => {
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "text/plain",
-      "text/html",
-      "application/xhtml+xml",
-      "text/markdown",
-      "text/x-markdown",
       "image/png",
       "image/jpeg",
       "image/jpg",
@@ -69,9 +64,6 @@ app.post("/upload", async (c) => {
     return c.json({ error: "Upload failed" }, 500);
   }
 });
-
-// MCP Bridge（供 kaoyan349 MCP 服务器调用）
-app.route("/api/mcp", mcpRouter);
 
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({

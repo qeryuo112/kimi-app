@@ -6,13 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
@@ -57,7 +50,6 @@ export default function SettingsPage() {
     aiMaxTokens: 128000,
     aiEnableThinking: true,
     aiTemperature: 0.5,
-    aiReasoningEffort: "xhigh" as "xhigh" | "max" | "high" | "low",
     dailyGoal: 120,
     weekGoal: 600,
     notifications: true,
@@ -74,7 +66,6 @@ export default function SettingsPage() {
         aiMaxTokens: settings.aiMaxTokens || 128000,
         aiEnableThinking: settings.aiEnableThinking ?? true,
         aiTemperature: settings.aiTemperature ?? 0.5,
-        aiReasoningEffort: (settings.aiReasoningEffort as "xhigh" | "max" | "high" | "low") || "xhigh",
         dailyGoal: settings.dailyGoal || 120,
         weekGoal: settings.weekGoal || 600,
         notifications: settings.notifications ?? true,
@@ -303,36 +294,6 @@ export default function SettingsPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   全账号通用配置。温度越低输出越确定严谨（适合知识提取），越高越创造性（适合对话）。推荐范围 0.2~0.7。
-                </p>
-              </div>
-
-              <div className="space-y-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  AI 思考强度
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-semibold">全局</span>
-                  {!isAdmin && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">仅管理员可编辑</span>
-                  )}
-                </label>
-                <Select
-                  value={form.aiReasoningEffort}
-                  onValueChange={(v) =>
-                    setForm({ ...form, aiReasoningEffort: v as "xhigh" | "max" | "high" | "low" })
-                  }
-                  disabled={!isAdmin}
-                >
-                  <SelectTrigger className={!isAdmin ? "bg-muted cursor-not-allowed" : ""}>
-                    <SelectValue placeholder="xhigh" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="xhigh">xhigh（OpenAI 系最强）</SelectItem>
-                    <SelectItem value="max">max（DeepSeek / Kimi K3 / GLM-5.2+ 最强）</SelectItem>
-                    <SelectItem value="high">high</SelectItem>
-                    <SelectItem value="low">low</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  全账号通用配置。思考强度按模型自动适配：OpenAI 推理模型用 xhigh，DeepSeek / Kimi K3 / GLM-5.2+ 归一化为 max，无分级的模型（GLM-4.x / Kimi K2.x）自动使用 thinking.enabled。
                 </p>
               </div>
             </CardContent>

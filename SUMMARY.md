@@ -90,12 +90,11 @@
   - `api/boot.ts`: 新增 `/upload` 端点
   - `api/lib/ai.ts`: 新增 `analyzeFilesForKnowledgeTree` 和 `analyzeFilesForSkills`
 
-### 4.2 上传接口
-- **位置**：`api/boot.ts` 的 `/upload` 端点
-- **存储**：上传文件到阿里云 OSS，返回公网 URL
-- **支持的文件类型**：PDF、Word、TXT、Markdown、HTML、PNG、JPG、JPEG、GIF、WebP
+### 4.2 上传服务器
+- **部署位置**：云端VPS (`/root/upload-server`)
+- **端口**：3001
+- **支持的文件类型**：PDF、Word、TXT、PNG、JPG、JPEG、GIF、WebP
 - **文件大小限制**：20MB
-- **说明**：原独立的 `upload-server` 服务已废弃删除，统一由主服务处理上传
 
 ---
 
@@ -214,8 +213,11 @@ npm run db:generate
 npm run db:migrate
 ```
 
-### 文件上传
-上传功能由主服务 `api/boot.ts` 的 `/upload` 端点提供，无需单独启动上传服务。
+### 文件上传服务器启动
+```bash
+cd /root/upload-server
+PUBLIC_URL=http://你的VPSIP:3001 node server.js
+```
 
 ---
 
